@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: runway-gma-batch-optimizer
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: batch-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: VEEQO_BASE_URL
+        value: https://api.veeqo.com
+      - key: VEEQO_ANALYZE_STATUS
+        value: awaiting_fulfillment
+      - key: VEEQO_CHANNEL_FILTER
+        value: Runway by Christian Siriano
+      - key: REQUIRE_GMA_SKUS
+        value: true
+      - key: DEFAULT_THRESHOLD
+        value: 10
+      - key: VEEQO_ORDERS_URL
+        value: https://app.veeqo.com/orders
+      - key: VEEQO_TAG_FILTER_URL_TEMPLATE
+        value: https://app.veeqo.com/orders?tags%5Bany_of%5D={tag_id}
+      - key: PORTAL_SESSION_SECRET
+        generateValue: true
+      - key: VEEQO_API_KEY
+        sync: false
+      - key: PORTAL_USERNAME
+        sync: false
+      - key: PORTAL_PASSWORD
+        sync: false

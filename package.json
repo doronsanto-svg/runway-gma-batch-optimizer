@@ -1,0 +1,25 @@
+{
+  "name": "runway-gma-batch-optimizer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Veeqo batch optimizer for Runway GMA fulfillment.",
+  "type": "module",
+  "scripts": {
+    "check:veeqo": "node scripts/check-veeqo-api.js",
+    "analyze": "node scripts/analyze-orders.js",
+    "inspect:order-shape": "node scripts/inspect-order-shape.js",
+    "inspect:orders": "node scripts/inspect-orders-by-id.js",
+    "list:channels": "node scripts/list-channels.js",
+    "generate:test-csv": "node scripts/generate-veeqo-test-csv.js",
+    "find:test-orders": "node scripts/find-test-orders.js",
+    "find:test-orders:all": "node scripts/find-test-orders-all-statuses.js",
+    "tag:test": "node scripts/tag-test-orders.js",
+    "untag:test": "node scripts/untag-test-orders.js",
+    "web": "node server.js",
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

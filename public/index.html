@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Runway GMA Batch Optimizer</title>
+    <link rel="stylesheet" href="/style.css?v=20260513-3">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Veeqo Read-Only Report</p>
+        <h1>Runway GMA Batch Optimizer</h1>
+      </div>
+      <div class="actions">
+        <button id="demoButton" type="button">Demo Data</button>
+        <button id="refreshButton" type="button">Live Re-analyze</button>
+        <button id="logoutButton" type="button">Log Out</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="controls">
+        <label for="teamSizeInput">Team members</label>
+        <input id="teamSizeInput" type="text" inputmode="numeric" pattern="[0-9]*" value="3">
+        <label for="channelInput">Channel</label>
+        <input id="channelInput" type="text" value="GMA Test">
+        <div class="forecast-note" id="teamForecast">Forecast updates after analysis.</div>
+      </section>
+
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="chart-section">
+        <div class="section-heading">
+          <h2>Order Mix</h2>
+          <span>Chart</span>
+        </div>
+        <div id="chartBars" class="chart-bars"></div>
+      </section>
+
+      <section class="clusters">
+        <div class="section-heading">
+          <h2>Active Batches</h2>
+          <span id="activeBatchCount">0</span>
+        </div>
+        <div id="activeBatches" class="cluster-list"></div>
+      </section>
+
+      <section class="clusters">
+        <div class="section-heading">
+          <h2>Completed Batches</h2>
+          <span id="completedBatchCount">0</span>
+        </div>
+        <div id="completedBatches" class="cluster-list"></div>
+      </section>
+
+      <section class="clusters">
+        <div class="section-heading">
+          <h2>Batch Candidates</h2>
+          <span id="batchCount">0</span>
+        </div>
+        <div id="batchClusters" class="cluster-list"></div>
+      </section>
+
+      <section class="clusters">
+        <div class="section-heading">
+          <h2>Borderline Clusters</h2>
+          <span id="borderlineCount">0</span>
+        </div>
+        <div id="borderlineClusters" class="cluster-list"></div>
+      </section>
+
+      <section class="clusters">
+        <div class="section-heading">
+          <h2>Multipack Queue</h2>
+          <span id="multipackCount">0</span>
+        </div>
+        <div id="multipackClusters" class="cluster-list"></div>
+      </section>
+    </main>
+
+    <div id="statusToast" class="toast" hidden></div>
+    <script src="/app.js?v=20260513-3"></script>
+  </body>
+</html>
