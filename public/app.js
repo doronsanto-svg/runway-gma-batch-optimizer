@@ -177,6 +177,13 @@ function renderSection(name, clusters) {
     : '<p class="empty">None right now.</p>';
 }
 
+function renderReportSections(report) {
+  const actionable = report.actionable_batches || report.clusters;
+  renderSection('batch', actionable.filter((cluster) => cluster.bucket === 'batch'));
+  renderSection('borderline', actionable.filter((cluster) => cluster.bucket === 'borderline'));
+  renderSection('multipack', actionable.filter((cluster) => cluster.bucket === 'multipack'));
+}
+
 function renderReport(report) {
   if (!report || report.empty) {
     summaryGrid.innerHTML = '<div class="metric"><span>Status</span><strong>No report yet</strong></div>';
@@ -192,10 +199,7 @@ function renderReport(report) {
   renderSummary(report);
   renderChart(report);
   renderBatches();
-  const actionable = report.actionable_batches || report.clusters;
-  renderSection('batch', actionable.filter((cluster) => cluster.bucket === 'batch'));
-  renderSection('borderline', actionable.filter((cluster) => cluster.bucket === 'borderline'));
-  renderSection('multipack', actionable.filter((cluster) => cluster.bucket === 'multipack'));
+  renderReportSections(report);
 }
 
 function renderChart(report) {
@@ -302,7 +306,10 @@ async function resumeBatch(batchId) {
 async function loadBatches() {
   const response = await handleAuthResponse(await fetch('/api/batches'));
   batchState = await response.json();
-  if (currentReport) renderSummary(currentReport);
+  if (currentReport) {
+    renderSummary(currentReport);
+    renderReportSections(currentReport);
+  }
   renderBatches();
 }
 
