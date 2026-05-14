@@ -117,12 +117,20 @@ function renderSummary(report) {
   const openOrders = Math.max(0, report.summary.included_orders - completedOrderCount);
   const openRevenue = Math.max(0, report.summary.total_revenue - completedRevenue);
   const carrierLookup = report.summary.carrier_lookup || {};
+  const skipped = report.summary.skipped || {};
   summaryGrid.innerHTML = [
     metric('Channel', report.channel_filter),
     metric('Source', report.data_source || 'live Veeqo'),
+    metric('Status', report.status || 'awaiting_fulfillment'),
+    metric('Pulled From Veeqo', report.orders_pulled ?? 0),
+    metric('In This Channel', report.summary.source_orders ?? 0),
+    metric('Included Orders', report.summary.included_orders ?? 0),
     metric('Carrier Basis', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
+    metric('Skipped Non-GMA', skipped.non_gma_only ?? 0),
+    metric('Skipped Mixed', skipped.mixed_gma_and_non_gma ?? 0),
+    metric('No Usable Items', skipped.no_items ?? 0),
     metric('Clusters', report.clusters.length),
     metric('Batch Candidates', report.summary.buckets.batch),
     metric('Borderline', report.summary.buckets.borderline),
@@ -359,6 +367,9 @@ async function loadLatest() {
 async function loadPortalConfig() {
   const response = await handleAuthResponse(await fetch('/api/session'));
   portalConfig = { ...portalConfig, ...(await response.json()) };
+  if (!channelInput.value.trim() && portalConfig.default_channel_filter) {
+    channelInput.value = portalConfig.default_channel_filter;
+  }
 }
 
 async function refreshAnalysis({ demo = false } = {}) {
@@ -374,7 +385,11 @@ async function refreshAnalysis({ demo = false } = {}) {
     const report = await response.json();
     if (!response.ok) throw new Error(report.error || 'Analyze failed');
     renderReport(report);
-    showToast(demo ? 'Demo analysis loaded.' : 'Read-only live analysis refreshed.');
+    if (!demo && Number(report.summary?.included_orders || 0) === 0) {
+      showToast(`No included orders. Pulled ${report.orders_pulled || 0}; channel matched ${report.summary?.source_orders || 0}.`);
+    } else {
+      showToast(demo ? 'Demo analysis loaded.' : 'Read-only live analysis refreshed.');
+    }
   } catch (error) {
     showToast(error.message);
   } finally {

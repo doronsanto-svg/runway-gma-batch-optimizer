@@ -271,6 +271,9 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, {
         user: session.user,
         auth_enabled: authEnabled(),
+        default_channel_filter: process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
+        analyze_status: process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment',
+        require_gma_skus: process.env.REQUIRE_GMA_SKUS !== 'false',
         veeqo_orders_url: config.veeqoOrdersUrl,
         veeqo_tag_filter_url_template: config.veeqoTagFilterUrlTemplate
       });
