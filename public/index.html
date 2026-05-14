@@ -24,7 +24,9 @@
         <label for="teamSizeInput">Team members</label>
         <input id="teamSizeInput" type="text" inputmode="numeric" pattern="[0-9]*" value="3">
         <label for="channelInput">Channel</label>
-        <input id="channelInput" type="text" value="">
+        <input id="channelInput" type="text" value="" list="channelOptions">
+        <datalist id="channelOptions"></datalist>
+        <button id="channelScanButton" type="button">Find Channels</button>
         <div class="forecast-note" id="teamForecast">Forecast updates after analysis.</div>
       </section>
 

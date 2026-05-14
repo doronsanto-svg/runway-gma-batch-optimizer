@@ -4,6 +4,8 @@ const demoButton = document.querySelector('#demoButton');
 const logoutButton = document.querySelector('#logoutButton');
 const teamSizeInput = document.querySelector('#teamSizeInput');
 const channelInput = document.querySelector('#channelInput');
+const channelOptions = document.querySelector('#channelOptions');
+const channelScanButton = document.querySelector('#channelScanButton');
 const teamForecast = document.querySelector('#teamForecast');
 const chartBars = document.querySelector('#chartBars');
 const activeBatches = document.querySelector('#activeBatches');
@@ -372,6 +374,34 @@ async function loadPortalConfig() {
   }
 }
 
+async function scanChannels() {
+  channelScanButton.disabled = true;
+  channelScanButton.textContent = 'Checking...';
+  try {
+    const response = await handleAuthResponse(await fetch('/api/channels'));
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Channel check failed');
+
+    channelOptions.innerHTML = data.channels
+      .map((channel) => `<option value="${escapeHtml(channel.name)}">${escapeHtml(channel.name)} (${channel.count})</option>`)
+      .join('');
+
+    if (data.channels.length) {
+      const current = channelInput.value.trim();
+      const exact = data.channels.some((channel) => channel.name.toLowerCase() === current.toLowerCase());
+      if (!exact) channelInput.value = data.channels[0].name;
+      showToast(`Found ${data.channels.length} ready-to-ship channels. Top: ${data.channels[0].name} (${data.channels[0].count}).`);
+    } else {
+      showToast(`No ready-to-ship channels found for ${data.status}.`);
+    }
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    channelScanButton.disabled = false;
+    channelScanButton.textContent = 'Find Channels';
+  }
+}
+
 async function refreshAnalysis({ demo = false } = {}) {
   refreshButton.disabled = true;
   demoButton.disabled = true;
@@ -402,6 +432,7 @@ async function refreshAnalysis({ demo = false } = {}) {
 
 refreshButton.addEventListener('click', () => refreshAnalysis());
 demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
+channelScanButton.addEventListener('click', scanChannels);
 logoutButton.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';

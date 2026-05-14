@@ -118,7 +118,7 @@ main {
   border: 1px solid var(--line);
   display: grid;
   gap: 12px;
-  grid-template-columns: auto 90px auto minmax(220px, 320px) minmax(240px, 1fr);
+  grid-template-columns: auto 90px auto minmax(220px, 320px) auto minmax(240px, 1fr);
   margin-bottom: 18px;
   padding: 14px 16px;
 }

@@ -7,7 +7,7 @@ import { readLatestReport } from './src/report.js';
 import { runReadOnlyAnalysis } from './src/analyzer.js';
 import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, updateActiveBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
-import { VeeqoClient } from './src/veeqo.js';
+import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 
 loadEnv();
 
@@ -292,6 +292,27 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/batches/completed') {
       sendJson(response, 200, { completed: readBatchStore().completed });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/channels') {
+      const status = process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment';
+      const pageSize = Number.parseInt(process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
+      const result = await makeVeeqoClient().listAllOrders({ status, pageSize });
+      const counts = new Map();
+
+      for (const order of result.orders) {
+        const name = getOrderChannelName(order) || 'Unknown';
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
+
+      sendJson(response, 200, {
+        status,
+        orders_pulled: result.orders.length,
+        channels: [...counts.entries()]
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      });
       return;
     }
 
