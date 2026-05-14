@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: runway-gma-batch-optimizer
+    name: fillement
     runtime: docker
     plan: starter
     healthCheckPath: /healthz

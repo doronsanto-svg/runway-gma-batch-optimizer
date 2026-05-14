@@ -124,11 +124,14 @@ function loginHtml() {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Runway GMA Batch Optimizer Login</title>
+    <link rel="icon" type="image/png" href="/odi-icon.png">
+    <link rel="apple-touch-icon" href="/odi-icon.png">
     <link rel="stylesheet" href="/style.css?v=20260513-3">
   </head>
   <body class="login-page">
     <main class="login-shell">
       <form id="loginForm" class="login-panel">
+        <img class="app-logo login-logo" src="/odi-icon.png" alt="ODI">
         <p class="eyebrow">Private Portal</p>
         <h1>Runway GMA Batch Optimizer</h1>
         <label for="usernameInput">Username</label>
