@@ -54,6 +54,7 @@ h1 {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -70,6 +71,10 @@ button {
 
 #demoButton {
   background: var(--gold);
+}
+
+.view-button.active {
+  background: var(--mint);
 }
 
 #logoutButton,
@@ -95,6 +100,25 @@ button:disabled {
   opacity: 0.65;
 }
 
+.is-processing::before {
+  animation: spin 0.8s linear infinite;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 13px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  width: 13px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 a.open-veeqo {
   align-items: center;
   background: #ffffff;
@@ -118,7 +142,7 @@ main {
   border: 1px solid var(--line);
   display: grid;
   gap: 12px;
-  grid-template-columns: auto 90px auto minmax(220px, 320px) auto minmax(240px, 1fr);
+  grid-template-columns: auto 90px auto 90px auto minmax(220px, 320px) auto minmax(240px, 1fr);
   margin-bottom: 18px;
   padding: 14px 16px;
 }
@@ -149,6 +173,18 @@ main {
   gap: 12px;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
   margin-bottom: 28px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+}
+
+.view {
+  display: none;
+}
+
+.active-view {
+  display: block;
 }
 
 .metric {
@@ -208,7 +244,7 @@ main {
   border: 1px solid var(--line);
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(220px, 1fr) repeat(4, minmax(100px, 140px)) minmax(120px, 150px);
+  grid-template-columns: minmax(220px, 1fr) repeat(5, minmax(90px, 130px)) minmax(120px, 150px);
   padding: 14px;
 }
 
@@ -308,6 +344,39 @@ main {
 .batch-actions {
   display: grid;
   gap: 8px;
+}
+
+.data-table {
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.table-row {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(260px, 2fr) minmax(120px, 0.7fr);
+  min-width: 820px;
+  padding: 12px 14px;
+}
+
+.history-table .table-row {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1.2fr) 80px 100px 100px 100px minmax(180px, 1.2fr) 110px;
+  min-width: 1050px;
+}
+
+.table-head {
+  background: var(--soft);
+  border-top: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .login-page {

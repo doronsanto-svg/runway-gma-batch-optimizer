@@ -3,6 +3,7 @@ const refreshButton = document.querySelector('#refreshButton');
 const demoButton = document.querySelector('#demoButton');
 const logoutButton = document.querySelector('#logoutButton');
 const teamSizeInput = document.querySelector('#teamSizeInput');
+const stationCountInput = document.querySelector('#stationCountInput');
 const channelInput = document.querySelector('#channelInput');
 const channelOptions = document.querySelector('#channelOptions');
 const channelScanButton = document.querySelector('#channelScanButton');
@@ -12,6 +13,12 @@ const activeBatches = document.querySelector('#activeBatches');
 const activeBatchCount = document.querySelector('#activeBatchCount');
 const completedBatches = document.querySelector('#completedBatches');
 const completedBatchCount = document.querySelector('#completedBatchCount');
+const issueSummaryGrid = document.querySelector('#issueSummaryGrid');
+const issueTable = document.querySelector('#issueTable');
+const issueTableCount = document.querySelector('#issueTableCount');
+const historySummaryGrid = document.querySelector('#historySummaryGrid');
+const historyTable = document.querySelector('#historyTable');
+const historyTableCount = document.querySelector('#historyTableCount');
 const toast = document.querySelector('#statusToast');
 
 let currentReport = null;
@@ -47,6 +54,32 @@ function minutes(value) {
   const hours = Math.floor(value / 60);
   const mins = Math.round(value % 60);
   return mins ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+function secondsSince(value) {
+  if (!value) return 0;
+  return Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+}
+
+function activeElapsedSeconds(batch) {
+  const totalSeconds = secondsSince(batch.started_at);
+  const pauseSeconds = Number(batch.pause_seconds || 0);
+  const currentPauseSeconds = batch.status === 'paused' && batch.paused_at ? secondsSince(batch.paused_at) : 0;
+  return Math.max(0, totalSeconds - pauseSeconds - currentPauseSeconds);
+}
+
+function setButtonProcessing(button, active, label = 'Processing...') {
+  if (!button) return;
+  if (active) {
+    button.dataset.originalText = button.textContent;
+    button.disabled = true;
+    button.classList.add('is-processing');
+    button.textContent = label;
+    return;
+  }
+  button.disabled = false;
+  button.classList.remove('is-processing');
+  if (button.dataset.originalText) button.textContent = button.dataset.originalText;
 }
 
 function showToast(message) {
@@ -110,6 +143,16 @@ function activeBatchForSubBatch(subBatchId) {
   return (batchState.active || []).find((batch) => batch.sub_batch_id === subBatchId);
 }
 
+function getHistoryTotals() {
+  const completed = batchState.completed || [];
+  return {
+    batches: completed.length,
+    orders: completed.reduce((sum, batch) => sum + Number(batch.order_count || 0), 0),
+    seconds: completed.reduce((sum, batch) => sum + Number(batch.duration_seconds || 0), 0),
+    estimateSeconds: completed.reduce((sum, batch) => sum + Number(batch.estimated_minutes || 0) * 60, 0)
+  };
+}
+
 function renderSummary(report) {
   if (!report || report.empty) return;
   const currentOrderIds = new Set((report.actionable_batches || report.clusters || []).flatMap((batch) => batch.order_ids || []));
@@ -120,6 +163,8 @@ function renderSummary(report) {
   const openRevenue = Math.max(0, report.summary.total_revenue - completedRevenue);
   const carrierLookup = report.summary.carrier_lookup || {};
   const skipped = report.summary.skipped || {};
+  const issueSummary = report.summary.issues || {};
+  const totals = getHistoryTotals();
   summaryGrid.innerHTML = [
     metric('Channel', report.channel_filter),
     metric('Source', report.data_source || 'live Veeqo'),
@@ -130,6 +175,10 @@ function renderSummary(report) {
     metric('Carrier Basis', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
+    metric('All-Time Processed', totals.orders),
+    metric('All-Time Work Time', minutes(totals.seconds / 60)),
+    metric('Issue Orders', issueSummary.total_orders ?? 0),
+    metric('Fraud / Risk', issueSummary.by_type?.fraud ?? 0),
     metric('Skipped Non-GMA', skipped.non_gma_only ?? 0),
     metric('Skipped Mixed', skipped.mixed_gma_and_non_gma ?? 0),
     metric('No Usable Items', skipped.no_items ?? 0),
@@ -142,16 +191,20 @@ function renderSummary(report) {
     metric('Generated', new Date(report.generated_at).toLocaleString())
   ].join('');
   renderTeamForecast();
+  renderIssueView(report);
+  renderHistoryView();
 }
 
 function renderCluster(cluster) {
   const safeSubBatchId = escapeHtml(cluster.sub_batch_id || cluster.signature);
   const carrierSource = cluster.carrier_source ? ` · ${cluster.carrier_source}` : '';
   const activeBatch = activeBatchForSubBatch(cluster.sub_batch_id);
+  const issueOrderIds = new Set((currentReport?.order_issues || []).map((issue) => issue.order_id));
+  const issueCount = (cluster.order_ids || []).filter((id) => issueOrderIds.has(id)).length;
   const action = activeBatch
     ? `<div class="batch-actions">
         <button type="button" disabled>Active</button>
-        <a class="open-veeqo" href="${escapeHtml(veeqoUrlForTag(activeBatch.tag_name, activeBatch.tag_id || ''))}" data-tag-name="${escapeHtml(activeBatch.tag_name)}" data-tag-id="${escapeHtml(activeBatch.tag_id || '')}">Open Veeqo</a>
+        <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(activeBatch.tag_name, activeBatch.tag_id || ''))}" data-tag-name="${escapeHtml(activeBatch.tag_name)}" data-tag-id="${escapeHtml(activeBatch.tag_id || '')}">Open Veeqo</a>
       </div>`
     : `<button class="start-batch" type="button" data-sub-batch-id="${safeSubBatchId}">Start Batch</button>`;
 
@@ -162,6 +215,7 @@ function renderCluster(cluster) {
         <p>${escapeHtml(cluster.signature)} · ${escapeHtml(cluster.carrier_label || 'Unknown')}${escapeHtml(carrierSource)}</p>
       </div>
       <div class="cell"><span>Orders</span><strong>${cluster.order_count}</strong></div>
+      <div class="cell"><span>Issues</span><strong>${issueCount}</strong></div>
       <div class="cell"><span>Revenue</span><strong>${money(cluster.total_revenue)}</strong></div>
       <div class="cell"><span>Estimate</span><strong>${minutes(cluster.estimated_minutes)}</strong></div>
       <div class="cell"><span>Station / Package</span><strong>${escapeHtml(cluster.station)} · ${escapeHtml(cluster.package)}</strong></div>
@@ -191,6 +245,8 @@ function renderReport(report) {
       section.count.textContent = '0';
       section.list.innerHTML = '<p class="empty">Run an analysis first.</p>';
     });
+    renderIssueView(null);
+    renderHistoryView();
     return;
   }
 
@@ -222,7 +278,7 @@ function renderChart(report) {
 function renderTeamForecast() {
   if (!currentReport) return;
   const teamSize = Math.max(1, Number.parseInt(teamSizeInput.value || '1', 10));
-  const stationCount = Math.max(1, Math.floor(teamSize / 2));
+  const stationCount = Math.max(1, Number.parseInt(stationCountInput.value || '1', 10));
   const adjustedMinutes = currentReport.summary.estimated_minutes / stationCount;
   teamForecast.textContent = `${teamSize} team member${teamSize === 1 ? '' : 's'} · ${stationCount} active station${stationCount === 1 ? '' : 's'} · ${minutes(adjustedMinutes)} estimated elapsed time`;
 }
@@ -232,9 +288,10 @@ function findCluster(subBatchId) {
   return actionable.find((cluster) => cluster.sub_batch_id === subBatchId || cluster.signature === subBatchId);
 }
 
-async function startBatch(subBatchId) {
+async function startBatch(subBatchId, button) {
   const cluster = findCluster(subBatchId);
   if (!cluster) return;
+  setButtonProcessing(button, true, 'Starting...');
   try {
     const response = await handleAuthResponse(await fetch('/api/batches', {
       method: 'POST',
@@ -252,10 +309,13 @@ async function startBatch(subBatchId) {
     }
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
   }
 }
 
-async function completeBatch(batchId) {
+async function completeBatch(batchId, button) {
+  setButtonProcessing(button, true, 'Completing...');
   try {
     const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/complete`, { method: 'POST' }));
     const result = await response.json();
@@ -264,10 +324,13 @@ async function completeBatch(batchId) {
     showToast(`Batch complete. Tag cleanup: ${result.batch.cleanup_status}`);
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
   }
 }
 
-async function cancelBatch(batchId) {
+async function cancelBatch(batchId, button) {
+  setButtonProcessing(button, true, 'Canceling...');
   try {
     const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/cancel`, { method: 'POST' }));
     const result = await response.json();
@@ -276,10 +339,13 @@ async function cancelBatch(batchId) {
     showToast(`Batch canceled. Tag cleanup: ${result.batch.cleanup_status}`);
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
   }
 }
 
-async function pauseBatch(batchId) {
+async function pauseBatch(batchId, button) {
+  setButtonProcessing(button, true, 'Pausing...');
   try {
     const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/pause`, { method: 'POST' }));
     const result = await response.json();
@@ -288,10 +354,13 @@ async function pauseBatch(batchId) {
     showToast(`Batch paused: ${result.batch.tag_name}`);
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
   }
 }
 
-async function resumeBatch(batchId) {
+async function resumeBatch(batchId, button) {
+  setButtonProcessing(button, true, 'Resuming...');
   try {
     const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/resume`, { method: 'POST' }));
     const result = await response.json();
@@ -300,6 +369,8 @@ async function resumeBatch(batchId) {
     showToast(`Batch resumed: ${result.batch.tag_name}`);
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
   }
 }
 
@@ -326,13 +397,14 @@ function renderBatches() {
           <div class="tag-row">
             <code>${escapeHtml(batch.tag_name)}</code>
             <button class="copy-tag" type="button" data-tag-name="${escapeHtml(batch.tag_name)}">Copy</button>
-            <a class="open-veeqo" href="${escapeHtml(veeqoUrlForTag(batch.tag_name, batch.tag_id || ''))}" data-tag-name="${escapeHtml(batch.tag_name)}" data-tag-id="${escapeHtml(batch.tag_id || '')}">Open Veeqo</a>
+            <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(batch.tag_name, batch.tag_id || ''))}" data-tag-name="${escapeHtml(batch.tag_name)}" data-tag-id="${escapeHtml(batch.tag_id || '')}">Open Veeqo</a>
           </div>
           <p>Started ${new Date(batch.started_at).toLocaleTimeString()}</p>
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
         <div class="cell"><span>Carrier</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong></div>
-        <div class="cell"><span>Package</span><strong>${escapeHtml(batch.package)}</strong></div>
+        <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
+        <div class="cell"><span>Elapsed</span><strong>${minutes(activeElapsedSeconds(batch) / 60)}</strong></div>
         <div class="cell"><span>Status</span><strong>${paused ? 'Paused' : 'Running'}</strong></div>
         <div class="batch-actions">
           <button class="complete-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Mark Complete</button>
@@ -359,11 +431,81 @@ function renderBatches() {
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
         <div class="cell"><span>Carrier</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong></div>
+        <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
         <div class="cell"><span>Duration</span><strong>${minutes((batch.duration_seconds || 0) / 60)}</strong></div>
         <div class="cell"><span>Rate</span><strong>${Number(batch.orders_per_minute || 0).toFixed(1)}/min</strong></div>
       </article>
     `).join('')
     : '<p class="empty">No completed batches yet.</p>';
+  renderHistoryView();
+}
+
+function renderIssueView(report = currentReport) {
+  if (!issueSummaryGrid || !issueTable || !issueTableCount) return;
+  const issues = report?.order_issues || [];
+  const summary = report?.summary?.issues || { by_type: {} };
+  issueSummaryGrid.innerHTML = [
+    metric('Issue Orders', summary.total_orders || 0),
+    metric('Hold', summary.hold_orders || 0),
+    metric('Warnings', summary.warning_orders || 0),
+    metric('Phone Missing', summary.by_type?.phone || 0),
+    metric('Address', summary.by_type?.address || 0),
+    metric('Fraud / Risk', summary.by_type?.fraud || 0),
+    metric('Shipping', summary.by_type?.shipping || 0)
+  ].join('');
+  issueTableCount.textContent = issues.length;
+  issueTable.innerHTML = issues.length ? `
+    <div class="data-table">
+      <div class="table-row table-head">
+        <span>Order</span><span>Customer</span><span>Severity</span><span>Issues</span><span>Links</span>
+      </div>
+      ${issues.map((issue) => `
+        <div class="table-row">
+          <span>${escapeHtml(issue.order_number)}</span>
+          <span>${escapeHtml(issue.customer || '')}</span>
+          <span><strong>${issue.severity === 'hold' ? 'Hold' : 'Warning'}</strong></span>
+          <span>${issue.issues.map((item) => `${escapeHtml(item.label)}: ${escapeHtml(item.detail)}`).join('<br>')}</span>
+          <span class="link-row">
+            <a target="_blank" rel="noopener" href="${escapeHtml(issue.veeqo_url)}">Veeqo</a>
+            ${issue.shopify_url ? `<a target="_blank" rel="noopener" href="${escapeHtml(issue.shopify_url)}">Shopify</a>` : ''}
+          </span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<p class="empty">No issue orders found in the current analysis.</p>';
+}
+
+function renderHistoryView() {
+  if (!historySummaryGrid || !historyTable || !historyTableCount) return;
+  const completed = batchState.completed || [];
+  const totals = getHistoryTotals();
+  historySummaryGrid.innerHTML = [
+    metric('Completed Batches', totals.batches),
+    metric('Orders Processed', totals.orders),
+    metric('Estimated Time', minutes(totals.estimateSeconds / 60)),
+    metric('Actual Time', minutes(totals.seconds / 60)),
+    metric('Avg Rate', totals.seconds ? `${(totals.orders / (totals.seconds / 60)).toFixed(1)}/min` : '0.0/min')
+  ].join('');
+  historyTableCount.textContent = completed.length;
+  historyTable.innerHTML = completed.length ? `
+    <div class="data-table history-table">
+      <div class="table-row table-head">
+        <span>Batch</span><span>Tag</span><span>Orders</span><span>Carrier</span><span>Estimate</span><span>Actual</span><span>Completed</span><span>Cleanup</span>
+      </div>
+      ${completed.map((batch) => `
+        <div class="table-row history-row">
+          <span>${escapeHtml(batch.label)}</span>
+          <span><code>${escapeHtml(batch.tag_name)}</code></span>
+          <span>${batch.order_count}</span>
+          <span>${escapeHtml(batch.carrier_label || 'Unknown')}</span>
+          <span>${minutes(batch.estimated_minutes || 0)}</span>
+          <span>${minutes((batch.duration_seconds || 0) / 60)}</span>
+          <span>${batch.completed_at ? new Date(batch.completed_at).toLocaleString() : ''}</span>
+          <span>${escapeHtml(batch.cleanup_status || '')}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<p class="empty">No completed batches yet.</p>';
 }
 
 async function loadLatest() {
@@ -382,8 +524,7 @@ async function loadPortalConfig() {
 }
 
 async function scanChannels() {
-  channelScanButton.disabled = true;
-  channelScanButton.textContent = 'Checking...';
+  setButtonProcessing(channelScanButton, true, 'Checking...');
   try {
     const response = await handleAuthResponse(await fetch('/api/channels'));
     const data = await response.json();
@@ -404,8 +545,7 @@ async function scanChannels() {
   } catch (error) {
     showToast(error.message);
   } finally {
-    channelScanButton.disabled = false;
-    channelScanButton.textContent = 'Find Channels';
+    setButtonProcessing(channelScanButton, false);
   }
 }
 
@@ -413,7 +553,7 @@ async function refreshAnalysis({ demo = false } = {}) {
   refreshButton.disabled = true;
   demoButton.disabled = true;
   const activeButton = demo ? demoButton : refreshButton;
-  activeButton.textContent = 'Analyzing...';
+  setButtonProcessing(activeButton, true, 'Analyzing...');
   try {
     const params = new URLSearchParams();
     if (demo) params.set('demo', '1');
@@ -432,8 +572,7 @@ async function refreshAnalysis({ demo = false } = {}) {
   } finally {
     refreshButton.disabled = false;
     demoButton.disabled = false;
-    refreshButton.textContent = 'Live Re-analyze';
-    demoButton.textContent = 'Demo Data';
+    setButtonProcessing(activeButton, false);
   }
 }
 
@@ -445,21 +584,28 @@ logoutButton.addEventListener('click', async () => {
   window.location.href = '/login';
 });
 teamSizeInput.addEventListener('input', renderTeamForecast);
+stationCountInput.addEventListener('input', renderTeamForecast);
+document.querySelectorAll('.view-button').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('.view-button').forEach((item) => item.classList.toggle('active', item === button));
+    document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active-view', view.id === button.dataset.view));
+  });
+});
 document.addEventListener('click', (event) => {
   const startButton = event.target.closest('.start-batch');
-  if (startButton) startBatch(startButton.dataset.subBatchId);
+  if (startButton) startBatch(startButton.dataset.subBatchId, startButton);
 
   const completeButton = event.target.closest('.complete-batch');
-  if (completeButton) completeBatch(completeButton.dataset.batchId);
+  if (completeButton) completeBatch(completeButton.dataset.batchId, completeButton);
 
   const cancelButton = event.target.closest('.cancel-batch');
-  if (cancelButton) cancelBatch(cancelButton.dataset.batchId);
+  if (cancelButton) cancelBatch(cancelButton.dataset.batchId, cancelButton);
 
   const pauseButton = event.target.closest('.pause-batch');
-  if (pauseButton) pauseBatch(pauseButton.dataset.batchId);
+  if (pauseButton) pauseBatch(pauseButton.dataset.batchId, pauseButton);
 
   const resumeButton = event.target.closest('.resume-batch');
-  if (resumeButton) resumeBatch(resumeButton.dataset.batchId);
+  if (resumeButton) resumeBatch(resumeButton.dataset.batchId, resumeButton);
 
   const copyButton = event.target.closest('.copy-tag');
   if (copyButton) {
@@ -469,6 +615,9 @@ document.addEventListener('click', (event) => {
   }
 
 });
+window.setInterval(() => {
+  if ((batchState.active || []).length) renderBatches();
+}, 30000);
 loadPortalConfig()
   .then(loadLatest)
   .catch((error) => showToast(error.message));

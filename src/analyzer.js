@@ -10,6 +10,7 @@ import {
 } from './veeqo.js';
 import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
+import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -131,8 +132,18 @@ export async function runReadOnlyAnalysis(options = {}) {
   }
 
   const channelOrders = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
+  const issueConfig = {
+    veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
+    veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
+    shopifyOrderUrlTemplate: process.env.SHOPIFY_ORDER_URL_TEMPLATE || ''
+  };
+  const orderIssues = channelOrders
+    .map((order) => analyzeOrderIssues(order, issueConfig))
+    .filter(Boolean);
+  const issueSummary = summarizeOrderIssues(orderIssues);
   const { clusters, subBatches, summary } = analyzeOrders(channelOrders, { threshold, requireGmaSkus });
   summary.carrier_lookup = carrierLookup;
+  summary.issues = issueSummary;
   summary.carriers = subBatches.reduce((counts, subBatch) => {
     counts[subBatch.carrier_label] = (counts[subBatch.carrier_label] || 0) + subBatch.order_count;
     return counts;
@@ -148,6 +159,7 @@ export async function runReadOnlyAnalysis(options = {}) {
     clusters,
     subBatches,
     summary,
+    orderIssues,
     dataSource
   });
   const paths = writeReports(payload);

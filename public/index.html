@@ -13,6 +13,9 @@
         <h1>Runway GMA Batch Optimizer</h1>
       </div>
       <div class="actions">
+        <button class="view-button active" type="button" data-view="dashboardView">Dashboard</button>
+        <button class="view-button" type="button" data-view="issuesView">Issues</button>
+        <button class="view-button" type="button" data-view="historyView">History</button>
         <button id="demoButton" type="button">Demo Data</button>
         <button id="refreshButton" type="button">Live Re-analyze</button>
         <button id="logoutButton" type="button">Log Out</button>
@@ -23,6 +26,8 @@
       <section class="controls">
         <label for="teamSizeInput">Team members</label>
         <input id="teamSizeInput" type="text" inputmode="numeric" pattern="[0-9]*" value="3">
+        <label for="stationCountInput">Stations</label>
+        <input id="stationCountInput" type="text" inputmode="numeric" pattern="[0-9]*" value="1">
         <label for="channelInput">Channel</label>
         <input id="channelInput" type="text" value="" list="channelOptions">
         <datalist id="channelOptions"></datalist>
@@ -30,54 +35,78 @@
         <div class="forecast-note" id="teamForecast">Forecast updates after analysis.</div>
       </section>
 
-      <section class="summary-grid" id="summaryGrid"></section>
+      <section id="dashboardView" class="view active-view">
+        <section class="summary-grid" id="summaryGrid"></section>
 
-      <section class="chart-section">
+        <section class="chart-section">
         <div class="section-heading">
           <h2>Order Mix</h2>
           <span>Chart</span>
         </div>
         <div id="chartBars" class="chart-bars"></div>
-      </section>
+        </section>
 
-      <section class="clusters">
+        <section class="clusters">
         <div class="section-heading">
           <h2>Active Batches</h2>
           <span id="activeBatchCount">0</span>
         </div>
         <div id="activeBatches" class="cluster-list"></div>
-      </section>
+        </section>
 
-      <section class="clusters">
+        <section class="clusters">
         <div class="section-heading">
           <h2>Completed Batches</h2>
           <span id="completedBatchCount">0</span>
         </div>
         <div id="completedBatches" class="cluster-list"></div>
-      </section>
+        </section>
 
-      <section class="clusters">
+        <section class="clusters">
         <div class="section-heading">
           <h2>Batch Candidates</h2>
           <span id="batchCount">0</span>
         </div>
         <div id="batchClusters" class="cluster-list"></div>
-      </section>
+        </section>
 
-      <section class="clusters">
+        <section class="clusters">
         <div class="section-heading">
           <h2>Borderline Clusters</h2>
           <span id="borderlineCount">0</span>
         </div>
         <div id="borderlineClusters" class="cluster-list"></div>
-      </section>
+        </section>
 
-      <section class="clusters">
+        <section class="clusters">
         <div class="section-heading">
           <h2>Multipack Queue</h2>
           <span id="multipackCount">0</span>
         </div>
         <div id="multipackClusters" class="cluster-list"></div>
+        </section>
+      </section>
+
+      <section id="issuesView" class="view">
+        <section class="summary-grid compact-grid" id="issueSummaryGrid"></section>
+        <section class="clusters">
+          <div class="section-heading">
+            <h2>Orders Requiring Review</h2>
+            <span id="issueTableCount">0</span>
+          </div>
+          <div id="issueTable"></div>
+        </section>
+      </section>
+
+      <section id="historyView" class="view">
+        <section class="summary-grid compact-grid" id="historySummaryGrid"></section>
+        <section class="clusters">
+          <div class="section-heading">
+            <h2>Processed Batch History</h2>
+            <span id="historyTableCount">0</span>
+          </div>
+          <div id="historyTable"></div>
+        </section>
       </section>
     </main>
 

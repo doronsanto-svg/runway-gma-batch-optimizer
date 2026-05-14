@@ -51,7 +51,9 @@ function portalConfig() {
     password: process.env.PORTAL_PASSWORD || '',
     sessionSecret: process.env.PORTAL_SESSION_SECRET || process.env.PORTAL_PASSWORD || 'local-dev-session',
     veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
-    veeqoTagFilterUrlTemplate: process.env.VEEQO_TAG_FILTER_URL_TEMPLATE || ''
+    veeqoTagFilterUrlTemplate: process.env.VEEQO_TAG_FILTER_URL_TEMPLATE || '',
+    veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
+    shopifyOrderUrlTemplate: process.env.SHOPIFY_ORDER_URL_TEMPLATE || ''
   };
 }
 
@@ -275,7 +277,9 @@ const server = createServer(async (request, response) => {
         analyze_status: process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment',
         require_gma_skus: process.env.REQUIRE_GMA_SKUS !== 'false',
         veeqo_orders_url: config.veeqoOrdersUrl,
-        veeqo_tag_filter_url_template: config.veeqoTagFilterUrlTemplate
+        veeqo_tag_filter_url_template: config.veeqoTagFilterUrlTemplate,
+        veeqo_order_url_template: config.veeqoOrderUrlTemplate,
+        shopify_order_url_template: config.shopifyOrderUrlTemplate
       });
       return;
     }
@@ -379,6 +383,7 @@ const server = createServer(async (request, response) => {
         package: subBatch.package,
         order_count: subBatch.order_count,
         total_revenue: subBatch.total_revenue,
+        estimated_minutes: subBatch.estimated_minutes,
         order_ids: subBatch.order_ids,
         order_numbers: subBatch.order_numbers,
         tag_name: tagName,

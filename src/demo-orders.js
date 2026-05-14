@@ -36,17 +36,39 @@ function lineItem([sku, quantity], index) {
 
 function makeOrder({ id, number, channel, status, price, items }) {
   const carrierCycle = ['USPS Ground Advantage', 'USPS Ground Advantage', 'UPS Ground', ''];
+  const hasPhone = id % 23 !== 0;
+  const hasAddressWarning = id % 37 === 0;
+  const hasFraudWarning = id % 41 === 0;
   return {
     id,
     number,
     status,
     channel: { name: channel },
+    customer: {
+      full_name: `GMA Tester ${id % 1000}`,
+      email: `gma-demo-${id}@example.com`,
+      phone: hasPhone ? '5550000000' : ''
+    },
+    deliver_to: {
+      first_name: 'GMA',
+      last_name: `Tester ${id % 1000}`,
+      address1: `${100 + (id % 400)} Test Order Lane`,
+      city: 'Los Angeles',
+      state: 'CA',
+      zip: '90001',
+      country: 'US',
+      phone: hasPhone ? '5550000000' : '',
+      validated: !hasAddressWarning,
+      verified: !hasAddressWarning,
+      location_found: true,
+      validation_message: hasAddressWarning ? 'Address requires manual verification.' : null
+    },
     created_at: new Date(Date.UTC(2026, 5, 1, 14, 0, id % 60)).toISOString(),
     delivery_method: carrierCycle[id % carrierCycle.length],
     total_price: price,
     subtotal_price: price,
     line_items: items.map(lineItem),
-    tags: []
+    tags: hasFraudWarning ? [{ id: id + 10, name: 'Fraud (low)', colour: '#80ff80' }] : []
   };
 }
 
