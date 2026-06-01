@@ -172,6 +172,8 @@ function renderSummary(report) {
     metric('Status', report.status || 'awaiting_fulfillment'),
     metric('Pulled From Veeqo', report.orders_pulled ?? 0),
     metric('In This Channel', report.summary.source_orders ?? 0),
+    metric('Held Orders', report.summary.held_orders ?? 0),
+    metric('Batchable Orders', report.summary.batchable_orders ?? report.summary.included_orders ?? 0),
     metric('Included Orders', report.summary.included_orders ?? 0),
     metric('Sync Mode', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Carrier refresh' : 'Fast sync'),
     metric('Carrier Basis', carrierLookup.basis === 'fast_cached_delivery_fallback' ? 'Cache + fallback' : carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
@@ -181,6 +183,7 @@ function renderSummary(report) {
     metric('All-Time Processed', totals.orders),
     metric('All-Time Work Time', minutes(totals.seconds / 60)),
     metric('Issue Orders', issueSummary.total_orders ?? 0),
+    metric('Hold Issues', issueSummary.hold_orders ?? 0),
     metric('Fraud / Risk', issueSummary.by_type?.fraud ?? 0),
     metric('Skipped Non-GMA', skipped.non_gma_only ?? 0),
     metric('Skipped Mixed', skipped.mixed_gma_and_non_gma ?? 0),
@@ -451,10 +454,9 @@ function renderIssueView(report = currentReport) {
     metric('Issue Orders', summary.total_orders || 0),
     metric('Hold', summary.hold_orders || 0),
     metric('Warnings', summary.warning_orders || 0),
-    metric('Phone Missing', summary.by_type?.phone || 0),
-    metric('Address', summary.by_type?.address || 0),
-    metric('Fraud / Risk', summary.by_type?.fraud || 0),
-    metric('Shipping', summary.by_type?.shipping || 0)
+    metric('Fraud Hold', summary.by_type?.fraud || 0),
+    metric('Address Hold', summary.by_type?.address || 0),
+    metric('Shipping Hold', summary.by_type?.shipping || 0)
   ].join('');
   issueTableCount.textContent = issues.length;
   issueTable.innerHTML = issues.length ? `

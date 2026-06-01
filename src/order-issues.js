@@ -112,7 +112,7 @@ export function analyzeOrderIssues(order, config = {}) {
     });
   }
 
-  if (tagText.includes('address') && (tagText.includes('hold') || tagText.includes('verify') || tagText.includes('invalid'))) {
+  if (tagText.includes('address') && (tagText.includes('hold') || tagText.includes('review') || tagText.includes('verify') || tagText.includes('invalid'))) {
     issues.push({
       type: 'address',
       label: 'Address Tag',
@@ -120,6 +120,9 @@ export function analyzeOrderIssues(order, config = {}) {
       detail: tagNames.filter((name) => /address|verify|invalid|hold/i.test(name)).join(', ')
     });
   }
+
+  const shopifyIssues = Array.isArray(config.shopifyIssues) ? config.shopifyIssues : [];
+  issues.push(...shopifyIssues);
 
   if (!issues.length) return null;
 
@@ -132,6 +135,7 @@ export function analyzeOrderIssues(order, config = {}) {
     severity: issues.some((issue) => issue.severity === 'hold') ? 'hold' : 'warning',
     issues,
     tags: tagNames,
+    hold: issues.some((issue) => issue.severity === 'hold'),
     veeqo_url: buildVeeqoOrderUrl(order, config),
     shopify_url: buildShopifyOrderUrl(order, config)
   };

@@ -12,6 +12,7 @@ import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
+import { getShopifyIssueMap } from './shopify.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -113,6 +114,14 @@ export function parseAnalyzeArgs(argv) {
   return args;
 }
 
+export function splitHeldOrders(orders, issueRecords) {
+  const heldOrderIds = new Set(issueRecords.filter((issue) => issue.hold).map((issue) => issue.order_id));
+  return {
+    heldOrderIds,
+    batchableOrders: orders.filter((order) => !heldOrderIds.has(order.id))
+  };
+}
+
 export async function runReadOnlyAnalysis(options = {}) {
   loadEnv();
 
@@ -166,16 +175,24 @@ export async function runReadOnlyAnalysis(options = {}) {
   }
 
   const channelOrders = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
+  const shopifyIssueMap = await getShopifyIssueMap(channelOrders);
   const issueConfig = {
     veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
     veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
     shopifyOrderUrlTemplate: process.env.SHOPIFY_ORDER_URL_TEMPLATE || ''
   };
   const orderIssues = channelOrders
-    .map((order) => analyzeOrderIssues(order, issueConfig))
+    .map((order) => analyzeOrderIssues(order, {
+      ...issueConfig,
+      shopifyIssues: shopifyIssueMap.get(order.id)?.issues || []
+    }))
     .filter(Boolean);
   const issueSummary = summarizeOrderIssues(orderIssues);
-  const { clusters, subBatches, summary } = analyzeOrders(channelOrders, { threshold, requireGmaSkus });
+  const { heldOrderIds, batchableOrders } = splitHeldOrders(channelOrders, orderIssues);
+  const { clusters, subBatches, summary } = analyzeOrders(batchableOrders, { threshold, requireGmaSkus });
+  summary.source_orders = channelOrders.length;
+  summary.batchable_orders = batchableOrders.length;
+  summary.held_orders = heldOrderIds.size;
   summary.carrier_lookup = carrierLookup;
   summary.issues = issueSummary;
   summary.carriers = subBatches.reduce((counts, subBatch) => {

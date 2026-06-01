@@ -77,6 +77,8 @@ export function writeReports(payload) {
     `- Veeqo reported total: ${payload.veeqo_total_count || 'unknown'}`,
     `- Veeqo reported pages: ${payload.veeqo_total_pages || 'unknown'}`,
     `- Ready-to-ship orders in channel/store: ${payload.summary.source_orders}`,
+    `- Held orders excluded from batches: ${payload.summary.held_orders || 0}`,
+    `- Batchable orders after holds: ${payload.summary.batchable_orders ?? payload.summary.included_orders}`,
     `- Orders included in clusters: ${payload.summary.included_orders}`,
     `- Skipped non-GMA orders: ${payload.summary.skipped.non_gma_only}`,
     `- Skipped mixed GMA/non-GMA orders: ${payload.summary.skipped.mixed_gma_and_non_gma}`,

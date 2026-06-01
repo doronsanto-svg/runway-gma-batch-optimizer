@@ -59,3 +59,26 @@ test('still flags address verification issues', () => {
 
   assert.equal(issue.issue_types.includes('address'), true);
 });
+
+test('flags address review tags as hold issues', () => {
+  const issue = analyzeOrderIssues(baseOrder({
+    tags: [{ name: 'Address Review' }]
+  }));
+
+  assert.equal(issue.issue_types.includes('address'), true);
+  assert.equal(issue.severity, 'hold');
+});
+
+test('adds Shopify-derived issues to the order issue record', () => {
+  const issue = analyzeOrderIssues(baseOrder(), {
+    shopifyIssues: [{
+      type: 'fraud',
+      label: 'Shopify Fraud Hold',
+      severity: 'hold',
+      detail: 'Shopify risk recommendation: CANCEL.'
+    }]
+  });
+
+  assert.equal(issue.issue_types.includes('fraud'), true);
+  assert.equal(issue.hold, true);
+});
