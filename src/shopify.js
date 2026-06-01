@@ -160,19 +160,55 @@ export class ShopifyClient {
 }
 
 export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 * 60 * 1000 } = {}) {
-  if (!shopifyLookupEnabled()) return new Map();
+  const { issueMap } = await getShopifyIssueScan(orders, { concurrency, ttlMs });
+  return issueMap;
+}
+
+export async function getShopifyIssueScan(orders, { concurrency = 4, ttlMs = 10 * 60 * 1000 } = {}) {
+  const issueMap = new Map();
+  const summary = {
+    enabled: shopifyLookupEnabled(),
+    checked: 0,
+    matched: 0,
+    no_match: 0,
+    issue_orders: 0,
+    address_holds: 0,
+    fraud_holds: 0,
+    lookup_errors: 0,
+    skipped_reason: ''
+  };
+
+  if (!summary.enabled) {
+    summary.skipped_reason = 'Shopify API credentials are not configured.';
+    return { issueMap, summary };
+  }
 
   const client = new ShopifyClient();
   const cache = readCache();
-  const result = new Map();
   let changed = false;
+
+  function applySummary(entry) {
+    summary.checked += 1;
+    if (entry.lookup_error) {
+      summary.lookup_errors += 1;
+      return;
+    }
+    if (entry.shopify_order_id || entry.shopify_gid) summary.matched += 1;
+    else summary.no_match += 1;
+
+    const issues = Array.isArray(entry.issues) ? entry.issues : [];
+    if (issues.length) summary.issue_orders += 1;
+    if (issues.some((issue) => issue.type === 'address')) summary.address_holds += 1;
+    if (issues.some((issue) => issue.type === 'fraud')) summary.fraud_holds += 1;
+  }
 
   async function lookup(order) {
     const key = getOrderLookupKey(order);
     if (!key) return;
 
     if (isCacheFresh(cache[key], ttlMs)) {
-      result.set(order.id, cache[key]);
+      issueMap.set(order.id, cache[key]);
+      applySummary(cache[key]);
       return;
     }
 
@@ -187,7 +223,8 @@ export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 *
         issues: shopifyOrder ? mapShopifyOrderToIssues(shopifyOrder) : []
       };
       cache[key] = entry;
-      result.set(order.id, entry);
+      issueMap.set(order.id, entry);
+      applySummary(entry);
       changed = true;
     } catch (error) {
       const entry = {
@@ -197,7 +234,8 @@ export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 *
         issues: []
       };
       cache[key] = entry;
-      result.set(order.id, entry);
+      issueMap.set(order.id, entry);
+      applySummary(entry);
       changed = true;
     }
   }
@@ -207,5 +245,5 @@ export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 *
   }
 
   if (changed) writeCache(cache);
-  return result;
+  return { issueMap, summary };
 }

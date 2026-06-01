@@ -163,6 +163,7 @@ function renderSummary(report) {
   const openOrders = Math.max(0, report.summary.included_orders - completedOrderCount);
   const openRevenue = Math.max(0, report.summary.total_revenue - completedRevenue);
   const carrierLookup = report.summary.carrier_lookup || {};
+  const shopifyLookup = report.summary.shopify_lookup || {};
   const skipped = report.summary.skipped || {};
   const issueSummary = report.summary.issues || {};
   const totals = getHistoryTotals();
@@ -178,6 +179,10 @@ function renderSummary(report) {
     metric('Sync Mode', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Carrier refresh' : 'Fast sync'),
     metric('Carrier Basis', carrierLookup.basis === 'fast_cached_delivery_fallback' ? 'Cache + fallback' : carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
     metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new / ${carrierLookup.cache_miss ?? 0} fallback`),
+    metric('Shopify Lookup', shopifyLookup.enabled ? 'On' : 'Off'),
+    metric('Shopify Matched', `${shopifyLookup.matched ?? 0} / ${shopifyLookup.checked ?? 0}`),
+    metric('Shopify Address Holds', shopifyLookup.address_holds ?? 0),
+    metric('Shopify Lookup Errors', shopifyLookup.lookup_errors ?? 0),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
     metric('All-Time Processed', totals.orders),
@@ -450,13 +455,18 @@ function renderIssueView(report = currentReport) {
   if (!issueSummaryGrid || !issueTable || !issueTableCount) return;
   const issues = report?.order_issues || [];
   const summary = report?.summary?.issues || { by_type: {} };
+  const shopifyLookup = report?.summary?.shopify_lookup || {};
   issueSummaryGrid.innerHTML = [
     metric('Issue Orders', summary.total_orders || 0),
     metric('Hold', summary.hold_orders || 0),
     metric('Warnings', summary.warning_orders || 0),
     metric('Fraud Hold', summary.by_type?.fraud || 0),
     metric('Address Hold', summary.by_type?.address || 0),
-    metric('Shipping Hold', summary.by_type?.shipping || 0)
+    metric('Shipping Hold', summary.by_type?.shipping || 0),
+    metric('Shopify Lookup', shopifyLookup.enabled ? 'On' : 'Off'),
+    metric('Shopify Matched', `${shopifyLookup.matched ?? 0} / ${shopifyLookup.checked ?? 0}`),
+    metric('Shopify Address Holds', shopifyLookup.address_holds ?? 0),
+    metric('Shopify Errors', shopifyLookup.lookup_errors ?? 0)
   ].join('');
   issueTableCount.textContent = issues.length;
   issueTable.innerHTML = issues.length ? `

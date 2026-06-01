@@ -12,7 +12,7 @@ import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
-import { getShopifyIssueMap } from './shopify.js';
+import { getShopifyIssueScan } from './shopify.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -175,7 +175,7 @@ export async function runReadOnlyAnalysis(options = {}) {
   }
 
   const channelOrders = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
-  const shopifyIssueMap = await getShopifyIssueMap(channelOrders);
+  const { issueMap: shopifyIssueMap, summary: shopifyLookup } = await getShopifyIssueScan(channelOrders);
   const issueConfig = {
     veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
     veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
@@ -194,6 +194,7 @@ export async function runReadOnlyAnalysis(options = {}) {
   summary.batchable_orders = batchableOrders.length;
   summary.held_orders = heldOrderIds.size;
   summary.carrier_lookup = carrierLookup;
+  summary.shopify_lookup = shopifyLookup;
   summary.issues = issueSummary;
   summary.carriers = subBatches.reduce((counts, subBatch) => {
     counts[subBatch.carrier_label] = (counts[subBatch.carrier_label] || 0) + subBatch.order_count;
