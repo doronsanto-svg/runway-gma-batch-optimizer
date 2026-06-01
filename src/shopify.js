@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(process.cwd(), 'data');
 const cachePath = resolve(dataDir, 'shopify-issue-cache.json');
+const cacheVersion = 2;
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : String(value || '').trim();
@@ -33,6 +34,7 @@ function getOrderSearchQuery(order) {
 }
 
 function isCacheFresh(entry, ttlMs) {
+  if (entry?.version !== cacheVersion) return false;
   if (!entry?.cached_at) return false;
   return Date.now() - new Date(entry.cached_at).getTime() < ttlMs;
 }
@@ -74,9 +76,23 @@ function addressTagIssues(shopifyOrder) {
   ];
 }
 
+function addressValidationIssues(shopifyOrder) {
+  const summary = clean(shopifyOrder?.shippingAddress?.validationResultSummary).toUpperCase();
+  if (!summary || summary === 'NO_ISSUES') return [];
+
+  return [
+    issue(
+      'address',
+      'Shopify Address Review',
+      `Shopify shipping address validation: ${summary}. Open Shopify to review the suggested correction.`
+    )
+  ];
+}
+
 function mapShopifyOrderToIssues(shopifyOrder) {
   return [
     ...riskIssues(shopifyOrder),
+    ...addressValidationIssues(shopifyOrder),
     ...addressTagIssues(shopifyOrder)
   ];
 }
@@ -125,6 +141,9 @@ export class ShopifyClient {
             legacyResourceId
             name
             tags
+            shippingAddress {
+              validationResultSummary
+            }
             risk {
               recommendation
               assessments {
@@ -160,6 +179,7 @@ export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 *
     try {
       const shopifyOrder = await client.findOrderByVeeqoOrder(order);
       const entry = {
+        version: cacheVersion,
         cached_at: new Date().toISOString(),
         shopify_order_id: shopifyOrder?.legacyResourceId || null,
         shopify_gid: shopifyOrder?.id || null,
@@ -171,6 +191,7 @@ export async function getShopifyIssueMap(orders, { concurrency = 4, ttlMs = 10 *
       changed = true;
     } catch (error) {
       const entry = {
+        version: cacheVersion,
         cached_at: new Date().toISOString(),
         lookup_error: error.message,
         issues: []

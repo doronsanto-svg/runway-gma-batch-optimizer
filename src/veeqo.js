@@ -51,25 +51,44 @@ export function getOrderCarrier(order) {
   );
   const text = typeof raw === 'string' ? raw.trim() : String(raw || '').trim();
   const normalized = text.toLowerCase();
+  const genericDeliveryMethods = new Set([
+    'standard',
+    'standard shipping',
+    'economy',
+    'economy shipping',
+    'ground',
+    'free shipping',
+    'shipping',
+    'default'
+  ]);
 
   if (!text) return { carrier: 'UNKNOWN', carrier_label: 'Unknown', carrier_source: 'missing' };
+  if (genericDeliveryMethods.has(normalized)) {
+    return {
+      carrier: 'CARRIER-REFRESH-NEEDED',
+      carrier_label: 'Carrier Refresh Needed',
+      carrier_source: text,
+      carrier_basis: 'delivery_method_fallback'
+    };
+  }
   if (normalized.includes('usps') || normalized.includes('postal')) {
-    return { carrier: 'USPS', carrier_label: 'USPS', carrier_source: text };
+    return { carrier: 'USPS', carrier_label: 'USPS', carrier_source: text, carrier_basis: 'delivery_method_fallback' };
   }
   if (normalized.includes('ups')) {
-    return { carrier: 'UPS', carrier_label: 'UPS', carrier_source: text };
+    return { carrier: 'UPS', carrier_label: 'UPS', carrier_source: text, carrier_basis: 'delivery_method_fallback' };
   }
   if (normalized.includes('fedex') || normalized.includes('federal express')) {
-    return { carrier: 'FEDEX', carrier_label: 'FedEx', carrier_source: text };
+    return { carrier: 'FEDEX', carrier_label: 'FedEx', carrier_source: text, carrier_basis: 'delivery_method_fallback' };
   }
   if (normalized.includes('dhl')) {
-    return { carrier: 'DHL', carrier_label: 'DHL', carrier_source: text };
+    return { carrier: 'DHL', carrier_label: 'DHL', carrier_source: text, carrier_basis: 'delivery_method_fallback' };
   }
 
   return {
     carrier: text.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNKNOWN',
     carrier_label: text,
-    carrier_source: text
+    carrier_source: text,
+    carrier_basis: 'delivery_method_fallback'
   };
 }
 

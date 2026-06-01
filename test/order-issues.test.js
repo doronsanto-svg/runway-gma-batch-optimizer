@@ -82,3 +82,17 @@ test('adds Shopify-derived issues to the order issue record', () => {
   assert.equal(issue.issue_types.includes('fraud'), true);
   assert.equal(issue.hold, true);
 });
+
+test('adds Shopify address validation warnings to the order issue record', () => {
+  const issue = analyzeOrderIssues(baseOrder(), {
+    shopifyIssues: [{
+      type: 'address',
+      label: 'Shopify Address Review',
+      severity: 'hold',
+      detail: 'Shopify shipping address validation: WARNING.'
+    }]
+  });
+
+  assert.equal(issue.issue_types.includes('address'), true);
+  assert.equal(issue.hold, true);
+});

@@ -83,6 +83,16 @@ test('splits identical SKU clusters into carrier sub-batches', () => {
   assert.equal(summary.buckets.multipack, 3);
 });
 
+test('does not treat generic standard delivery method as a real carrier', () => {
+  const { subBatches } = analyzeOrders([
+    order(1, '#1', [['PL-RW-SB15-R', 1]], '10.00', 'Standard')
+  ], { threshold: 2 });
+
+  assert.equal(subBatches.length, 1);
+  assert.equal(subBatches[0].carrier, 'CARRIER-REFRESH-NEEDED');
+  assert.equal(subBatches[0].carrier_label, 'Carrier Refresh Needed');
+});
+
 test('uses Veeqo shipping-rate carrier enrichment ahead of delivery method', () => {
   const enrichedOrder = order(1, '#1', [['PL-RW-SB15-R', 1]], '10.00', 'UPS Ground');
   enrichedOrder._batch_optimizer_carrier = {
