@@ -12,7 +12,6 @@ import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
-import { getShopifyIssueScan } from './shopify.js';
 import { buildPrepRows, prepSummary, readPrepStore } from './prep-store.js';
 
 function parseBoolean(value, fallback = true) {
@@ -135,7 +134,6 @@ export async function runReadOnlyAnalysis(options = {}) {
   const refreshCarriers = Boolean(options.refreshCarriers);
   const useShippingRates = refreshCarriers || parseBoolean(options.useShippingRates ?? process.env.VEEQO_USE_SHIPPING_RATES, true);
   const rateConcurrency = Number.parseInt(process.env.VEEQO_RATE_LOOKUP_CONCURRENCY || '4', 10);
-  const shopifyIssueCacheTtlMs = Number.parseInt(process.env.SHOPIFY_ISSUE_CACHE_TTL_MS || '0', 10);
 
   let orders;
   let totalCount;
@@ -177,19 +175,13 @@ export async function runReadOnlyAnalysis(options = {}) {
   }
 
   const channelOrders = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
-  const { issueMap: shopifyIssueMap, summary: shopifyLookup } = await getShopifyIssueScan(channelOrders, {
-    ttlMs: Number.isFinite(shopifyIssueCacheTtlMs) && shopifyIssueCacheTtlMs >= 0 ? shopifyIssueCacheTtlMs : 0
-  });
   const issueConfig = {
     veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
     veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
     shopifyOrderUrlTemplate: process.env.SHOPIFY_ORDER_URL_TEMPLATE || ''
   };
   const orderIssues = channelOrders
-    .map((order) => analyzeOrderIssues(order, {
-      ...issueConfig,
-      shopifyIssues: shopifyIssueMap.get(order.id)?.issues || []
-    }))
+    .map((order) => analyzeOrderIssues(order, issueConfig))
     .filter(Boolean);
   const issueSummary = summarizeOrderIssues(orderIssues);
   const { heldOrderIds, batchableOrders } = splitHeldOrders(channelOrders, orderIssues);
@@ -199,7 +191,6 @@ export async function runReadOnlyAnalysis(options = {}) {
   summary.batchable_orders = batchableOrders.length;
   summary.held_orders = heldOrderIds.size;
   summary.carrier_lookup = carrierLookup;
-  summary.shopify_lookup = shopifyLookup;
   summary.issues = issueSummary;
   summary.carriers = subBatches.reduce((counts, subBatch) => {
     counts[subBatch.carrier_label] = (counts[subBatch.carrier_label] || 0) + subBatch.order_count;

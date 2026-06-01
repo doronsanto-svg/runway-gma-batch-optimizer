@@ -121,9 +121,6 @@ export function analyzeOrderIssues(order, config = {}) {
     });
   }
 
-  const shopifyIssues = Array.isArray(config.shopifyIssues) ? config.shopifyIssues : [];
-  issues.push(...shopifyIssues);
-
   if (!issues.length) return null;
 
   return {
