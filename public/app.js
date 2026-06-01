@@ -173,6 +173,7 @@ function renderSummary(report) {
     metric('In This Channel', report.summary.source_orders ?? 0),
     metric('Included Orders', report.summary.included_orders ?? 0),
     metric('Carrier Basis', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
+    metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new`),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
     metric('All-Time Processed', totals.orders),

@@ -11,6 +11,7 @@ import {
 import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
+import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -21,6 +22,9 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
   let enriched = 0;
   let fallback = 0;
   let failed = 0;
+  let cached = 0;
+  const cache = readCarrierCache();
+  let cacheChanged = false;
 
   async function enrich(order) {
     let orderForRates = order;
@@ -32,6 +36,16 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
 
     if (!allocationId) {
       fallback += 1;
+      return;
+    }
+
+    const cacheKey = String(allocationId);
+    if (cache[cacheKey]?.carrier) {
+      order._batch_optimizer_carrier = {
+        ...cache[cacheKey],
+        carrier_basis: 'shipping_rate_cache'
+      };
+      cached += 1;
       return;
     }
 
@@ -49,6 +63,13 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
         carrier_source: rate.title || rate.name || rate.service_name || carrierInfo.carrier_source,
         carrier_basis: 'shipping_rate'
       };
+      cache[cacheKey] = {
+        carrier: order._batch_optimizer_carrier.carrier,
+        carrier_label: order._batch_optimizer_carrier.carrier_label,
+        carrier_source: order._batch_optimizer_carrier.carrier_source,
+        cached_at: new Date().toISOString()
+      };
+      cacheChanged = true;
       enriched += 1;
     } catch {
       failed += 1;
@@ -61,7 +82,9 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
     await Promise.all(group.map((order) => enrich(order)));
   }
 
-  return { enriched, fallback, failed };
+  if (cacheChanged) writeCarrierCache(cache);
+
+  return { enriched, cached, fallback, failed };
 }
 
 export function parseAnalyzeArgs(argv) {
