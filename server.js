@@ -5,7 +5,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { loadEnv } from './src/env.js';
 import { readLatestReport } from './src/report.js';
 import { runReadOnlyAnalysis } from './src/analyzer.js';
-import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, updateActiveBatchRecord } from './src/batch-store.js';
+import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
@@ -301,7 +301,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/batches') {
-      sendJson(response, 200, listBatches());
+      const report = readLatestReport();
+      sendJson(response, 200, report ? reconcileActiveBatches(report) : listBatches());
       return;
     }
 

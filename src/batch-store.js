@@ -22,6 +22,46 @@ export function listBatches() {
   return readBatchStore();
 }
 
+export function reconcileActiveBatches(report) {
+  const store = readBatchStore();
+  const actionable = report?.actionable_batches || report?.clusters || [];
+  const bySubBatchId = new Map(actionable.map((batch) => [batch.sub_batch_id || batch.signature, batch]));
+  let changed = false;
+
+  store.active = store.active.map((batch) => {
+    const latest = bySubBatchId.get(batch.sub_batch_id);
+    if (!latest) return batch;
+
+    const nextOrderIds = latest.order_ids || [];
+    const currentOrderIds = batch.order_ids || [];
+    const sameOrders = currentOrderIds.length === nextOrderIds.length && currentOrderIds.every((id, index) => id === nextOrderIds[index]);
+    if (
+      sameOrders &&
+      batch.order_count === latest.order_count &&
+      batch.total_revenue === latest.total_revenue &&
+      batch.estimated_minutes === latest.estimated_minutes
+    ) {
+      return batch;
+    }
+
+    changed = true;
+    return {
+      ...batch,
+      original_order_count: batch.original_order_count || batch.order_count,
+      original_order_ids: batch.original_order_ids || batch.order_ids,
+      order_count: latest.order_count,
+      total_revenue: latest.total_revenue,
+      estimated_minutes: latest.estimated_minutes,
+      order_ids: nextOrderIds,
+      order_numbers: latest.order_numbers || [],
+      reconciled_at: new Date().toISOString()
+    };
+  });
+
+  if (changed) writeBatchStore(store);
+  return store;
+}
+
 export function createBatchRecord(record) {
   const store = readBatchStore();
   const existing = store.active.find((batch) => batch.sub_batch_id === record.sub_batch_id);

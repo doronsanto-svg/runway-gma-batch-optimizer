@@ -122,6 +122,23 @@ export function splitHeldOrders(orders, issueRecords) {
   };
 }
 
+export function orderHasPurchasedLabel(order) {
+  const allocations = Array.isArray(order?.allocations) ? order.allocations : [];
+  return Boolean(
+    order?.shipped_at ||
+    order?.shipment ||
+    (Array.isArray(order?.shipments) && order.shipments.length > 0) ||
+    order?.tracking_number ||
+    (Array.isArray(order?.tracking_numbers) && order.tracking_numbers.length > 0) ||
+    allocations.some((allocation) => (
+      allocation?.shipment ||
+      (Array.isArray(allocation?.shipments) && allocation.shipments.length > 0) ||
+      allocation?.tracking_number ||
+      (Array.isArray(allocation?.tracking_numbers) && allocation.tracking_numbers.length > 0)
+    ))
+  );
+}
+
 export async function runReadOnlyAnalysis(options = {}) {
   loadEnv();
 
@@ -185,10 +202,14 @@ export async function runReadOnlyAnalysis(options = {}) {
     .filter(Boolean);
   const issueSummary = summarizeOrderIssues(orderIssues);
   const { heldOrderIds, batchableOrders } = splitHeldOrders(channelOrders, orderIssues);
-  const { clusters, subBatches, summary } = analyzeOrders(batchableOrders, { threshold, requireGmaSkus });
+  const labelPurchasedOrders = batchableOrders.filter(orderHasPurchasedLabel);
+  const labelNeededOrders = batchableOrders.filter((order) => !orderHasPurchasedLabel(order));
+  const { clusters, subBatches, summary } = analyzeOrders(labelNeededOrders, { threshold, requireGmaSkus });
   const prepRows = buildPrepRows(clusters, readPrepStore());
   summary.source_orders = channelOrders.length;
   summary.batchable_orders = batchableOrders.length;
+  summary.label_needed_orders = labelNeededOrders.length;
+  summary.label_purchased_orders = labelPurchasedOrders.length;
   summary.held_orders = heldOrderIds.size;
   summary.carrier_lookup = carrierLookup;
   summary.issues = issueSummary;
