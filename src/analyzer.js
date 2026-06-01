@@ -13,6 +13,7 @@ import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
 import { getShopifyIssueScan } from './shopify.js';
+import { buildPrepRows, prepSummary, readPrepStore } from './prep-store.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -193,6 +194,7 @@ export async function runReadOnlyAnalysis(options = {}) {
   const issueSummary = summarizeOrderIssues(orderIssues);
   const { heldOrderIds, batchableOrders } = splitHeldOrders(channelOrders, orderIssues);
   const { clusters, subBatches, summary } = analyzeOrders(batchableOrders, { threshold, requireGmaSkus });
+  const prepRows = buildPrepRows(clusters, readPrepStore());
   summary.source_orders = channelOrders.length;
   summary.batchable_orders = batchableOrders.length;
   summary.held_orders = heldOrderIds.size;
@@ -203,6 +205,7 @@ export async function runReadOnlyAnalysis(options = {}) {
     counts[subBatch.carrier_label] = (counts[subBatch.carrier_label] || 0) + subBatch.order_count;
     return counts;
   }, {});
+  summary.prep = prepSummary(prepRows);
   const payload = buildReportPayload({
     channelFilter,
     requireGmaSkus,
@@ -215,6 +218,7 @@ export async function runReadOnlyAnalysis(options = {}) {
     subBatches,
     summary,
     orderIssues,
+    prepRows,
     dataSource
   });
   const paths = writeReports(payload);

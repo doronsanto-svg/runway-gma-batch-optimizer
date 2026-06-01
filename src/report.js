@@ -39,7 +39,7 @@ function renderClusterSection(title, clusters) {
   return lines;
 }
 
-export function buildReportPayload({ channelFilter, requireGmaSkus, status, threshold, orders, totalCount, totalPages, clusters, subBatches = null, summary, orderIssues = [], dataSource = 'live Veeqo' }) {
+export function buildReportPayload({ channelFilter, requireGmaSkus, status, threshold, orders, totalCount, totalPages, clusters, subBatches = null, summary, orderIssues = [], prepRows = [], dataSource = 'live Veeqo' }) {
   return {
     generated_at: new Date().toISOString(),
     data_source: dataSource,
@@ -52,6 +52,7 @@ export function buildReportPayload({ channelFilter, requireGmaSkus, status, thre
     veeqo_total_pages: totalPages || null,
     summary,
     order_issues: orderIssues,
+    prep_rows: prepRows,
     clusters,
     actionable_batches: subBatches || clusters
   };

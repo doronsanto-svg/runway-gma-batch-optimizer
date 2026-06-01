@@ -8,6 +8,7 @@ import { runReadOnlyAnalysis } from './src/analyzer.js';
 import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, updateActiveBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
+import { buildPrepRows, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
 
 loadEnv();
 
@@ -184,6 +185,13 @@ function findStoredBatch(batchId) {
   return [...store.active, ...store.completed, ...store.canceled].find((batch) => batch.id === batchId);
 }
 
+function latestPrepPayload() {
+  const report = readLatestReport() || { clusters: [] };
+  const store = readPrepStore();
+  const rows = buildPrepRows(report.clusters || [], store);
+  return { state: store, rows, summary: prepSummary(rows) };
+}
+
 function veeqoUrlForBatch(batch) {
   const config = portalConfig();
   if (!batch?.tag_id) return config.veeqoOrdersUrl;
@@ -302,6 +310,11 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/prep') {
+      sendJson(response, 200, latestPrepPayload());
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const status = process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment';
       const pageSize = Number.parseInt(process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
@@ -344,6 +357,37 @@ const server = createServer(async (request, response) => {
         refreshCarriers: url.searchParams.get('refresh_carriers') === '1'
       });
       sendJson(response, 200, payload);
+      return;
+    }
+
+    if (request.method === 'PATCH' && url.pathname === '/api/prep/package') {
+      const body = await readJsonBody(request);
+      if (!body.signature) {
+        sendJson(response, 400, { error: 'signature is required.' });
+        return;
+      }
+      setPackageOverride({
+        signature: body.signature,
+        label: body.label || '',
+        packageName: body.package || ''
+      });
+      sendJson(response, 200, latestPrepPayload());
+      return;
+    }
+
+    if (request.method === 'PATCH' && url.pathname === '/api/prep/status') {
+      const body = await readJsonBody(request);
+      if (!body.signature || !body.package) {
+        sendJson(response, 400, { error: 'signature and package are required.' });
+        return;
+      }
+      setPreparedStatus({
+        signature: body.signature,
+        label: body.label || '',
+        packageName: body.package,
+        prepared: body.prepared
+      });
+      sendJson(response, 200, latestPrepPayload());
       return;
     }
 

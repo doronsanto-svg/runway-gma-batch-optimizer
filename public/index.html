@@ -19,6 +19,7 @@
       </div>
       <div class="actions">
         <button class="view-button active" type="button" data-view="dashboardView">Dashboard</button>
+        <button class="view-button" type="button" data-view="prepView">Prep</button>
         <button class="view-button" type="button" data-view="issuesView">Issues</button>
         <button class="view-button" type="button" data-view="historyView">History</button>
         <button id="demoButton" type="button">Demo Data</button>
@@ -90,6 +91,21 @@
           <span id="multipackCount">0</span>
         </div>
         <div id="multipackClusters" class="cluster-list"></div>
+        </section>
+      </section>
+
+      <section id="prepView" class="view">
+        <section class="summary-grid compact-grid" id="prepSummaryGrid"></section>
+        <section class="clusters prep-sheet">
+          <div class="section-heading">
+            <h2>Prep / Assembly</h2>
+            <div class="heading-actions">
+              <span id="prepTableCount">0</span>
+              <button id="printPrepButton" type="button">Print Prep Sheet</button>
+            </div>
+          </div>
+          <div class="notice">Prepare packages unsealed. Final sealing happens after labels are available.</div>
+          <div id="prepTable"></div>
         </section>
       </section>
 

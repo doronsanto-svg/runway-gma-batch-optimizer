@@ -14,6 +14,10 @@ const activeBatches = document.querySelector('#activeBatches');
 const activeBatchCount = document.querySelector('#activeBatchCount');
 const completedBatches = document.querySelector('#completedBatches');
 const completedBatchCount = document.querySelector('#completedBatchCount');
+const prepSummaryGrid = document.querySelector('#prepSummaryGrid');
+const prepTable = document.querySelector('#prepTable');
+const prepTableCount = document.querySelector('#prepTableCount');
+const printPrepButton = document.querySelector('#printPrepButton');
 const issueSummaryGrid = document.querySelector('#issueSummaryGrid');
 const issueTable = document.querySelector('#issueTable');
 const issueTableCount = document.querySelector('#issueTableCount');
@@ -24,6 +28,7 @@ const toast = document.querySelector('#statusToast');
 
 let currentReport = null;
 let batchState = { active: [], completed: [] };
+let prepState = { rows: [], summary: {} };
 let portalConfig = {
   veeqo_orders_url: 'https://app.veeqo.com/orders',
   veeqo_tag_filter_url_template: ''
@@ -138,6 +143,21 @@ function escapeHtml(value) {
 
 function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function packageControl(row) {
+  const options = [...new Set([...(row.package_options || []), row.package].filter(Boolean))];
+  const selectOptions = options.map((option) => `<option value="${escapeHtml(option)}"${option === row.package ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('');
+  const customValue = row.package_options?.includes(row.package) ? '' : row.package;
+  return `
+    <div class="package-control">
+      <select class="prep-package-select" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}">
+        ${selectOptions}
+        <option value="__custom__"${customValue ? ' selected' : ''}>Custom</option>
+      </select>
+      <input class="prep-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
+    </div>
+  `;
 }
 
 function shopifyLookupNotice(shopifyLookup = {}) {
@@ -282,6 +302,7 @@ function renderReport(report) {
   renderSummary(report);
   renderChart(report);
   renderBatches();
+  renderPrepView();
   renderReportSections(report);
 }
 
@@ -467,6 +488,125 @@ function renderBatches() {
   renderHistoryView();
 }
 
+function prepRows() {
+  return prepState.rows?.length ? prepState.rows : currentReport?.prep_rows || [];
+}
+
+function renderPrepView() {
+  if (!prepSummaryGrid || !prepTable || !prepTableCount) return;
+  const rows = prepRows();
+  const summary = prepState.summary || currentReport?.summary?.prep || {};
+  prepSummaryGrid.innerHTML = [
+    metric('Prep Rows', summary.rows ?? rows.length),
+    metric('Open Rows', summary.open_rows ?? rows.filter((row) => !row.prepared).length),
+    metric('Prepared Rows', summary.prepared_rows ?? rows.filter((row) => row.prepared).length),
+    metric('Open Orders', summary.open_orders ?? rows.filter((row) => !row.prepared).reduce((sum, row) => sum + row.order_count, 0)),
+    metric('Prepared Orders', summary.prepared_orders ?? rows.filter((row) => row.prepared).reduce((sum, row) => sum + row.order_count, 0)),
+    metric('Open Prep Time', minutes(summary.estimated_minutes || 0))
+  ].join('');
+  prepTableCount.textContent = rows.length;
+  prepTable.innerHTML = rows.length ? `
+    <div class="data-table prep-table">
+      <div class="table-row table-head">
+        <span>Item / Kit</span><span>Orders</span><span>Package</span><span>Station</span><span>Estimate</span><span>Sample Orders</span><span>Status</span>
+      </div>
+      ${rows.map((row) => `
+        <div class="table-row prep-row${row.prepared ? ' prepared' : ''}">
+          <span>
+            <strong>${escapeHtml(row.label)}</strong>
+            <small>${escapeHtml(row.signature)}</small>
+          </span>
+          <span>${row.order_count}</span>
+          <span>${packageControl(row)}</span>
+          <span>${escapeHtml(row.station)}</span>
+          <span>${minutes(row.estimated_minutes || 0)}</span>
+          <span>${escapeHtml((row.sample_order_numbers || []).join(', '))}</span>
+          <span>
+            <button class="${row.prepared ? 'undo-prep' : 'mark-prepared'}" type="button" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-package="${escapeHtml(row.package)}">${row.prepared ? 'Undo Prepared' : 'Mark Prepared'}</button>
+          </span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<p class="empty">No prep rows found in the current analysis.</p>';
+}
+
+async function loadPrep() {
+  const response = await handleAuthResponse(await fetch('/api/prep'));
+  prepState = await response.json();
+  renderPrepView();
+}
+
+async function updatePrepPackage(signature, label, packageName) {
+  const response = await handleAuthResponse(await fetch('/api/prep/package', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature, label, package: packageName })
+  }));
+  prepState = await response.json();
+  renderPrepView();
+  showToast('Prep package saved.');
+}
+
+async function updatePrepStatus(signature, label, packageName, prepared, button) {
+  setButtonProcessing(button, true, prepared ? 'Saving...' : 'Undoing...');
+  try {
+    const response = await handleAuthResponse(await fetch('/api/prep/status', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature, label, package: packageName, prepared })
+    }));
+    prepState = await response.json();
+    renderPrepView();
+    showToast(prepared ? 'Prep row marked prepared.' : 'Prep row reopened.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
+function printPrepSheet() {
+  const rows = prepRows();
+  const opened = rows.filter((row) => !row.prepared);
+  const content = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Prep Sheet</title>
+        <style>
+          body { color: #1c2430; font-family: Arial, sans-serif; margin: 28px; }
+          h1 { font-size: 24px; margin: 0 0 6px; }
+          p { margin: 0 0 18px; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #d9dee7; font-size: 12px; padding: 8px; text-align: left; vertical-align: top; }
+          th { background: #f5f7fa; }
+        </style>
+      </head>
+      <body>
+        <h1>Prep / Assembly Sheet</h1>
+        <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · Prepare unsealed packages only.</p>
+        <table>
+          <thead>
+            <tr><th>Item / Kit</th><th>Orders</th><th>Package</th><th>Station</th><th>Estimate</th><th>Sample Orders</th></tr>
+          </thead>
+          <tbody>
+            ${opened.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td><td>${escapeHtml(row.station)}</td><td>${minutes(row.estimated_minutes || 0)}</td><td>${escapeHtml((row.sample_order_numbers || []).join(', '))}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    showToast('Print window blocked.');
+    return;
+  }
+  printWindow.document.write(content);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 function renderIssueView(report = currentReport) {
   if (!issueSummaryGrid || !issueTable || !issueTableCount) return;
   const issues = report?.order_issues || [];
@@ -544,6 +684,7 @@ async function loadLatest() {
   const response = await handleAuthResponse(await fetch('/api/latest-analysis'));
   const report = await response.json();
   await loadBatches();
+  await loadPrep();
   renderReport(report);
 }
 
@@ -595,6 +736,7 @@ async function refreshAnalysis({ demo = false, refreshCarriers = false } = {}) {
     const response = await handleAuthResponse(await fetch(`/api/analyze?${params.toString()}`, { method: 'POST' }));
     const report = await response.json();
     if (!response.ok) throw new Error(report.error || 'Analyze failed');
+    prepState = { rows: report.prep_rows || [], summary: report.summary?.prep || {} };
     renderReport(report);
     if (!demo && Number(report.summary?.included_orders || 0) === 0) {
       showToast(`No included orders. Pulled ${report.orders_pulled || 0}; channel matched ${report.summary?.source_orders || 0}.`);
@@ -615,6 +757,7 @@ refreshButton.addEventListener('click', () => refreshAnalysis());
 carrierRefreshButton.addEventListener('click', () => refreshAnalysis({ refreshCarriers: true }));
 demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
 channelScanButton.addEventListener('click', scanChannels);
+printPrepButton.addEventListener('click', printPrepSheet);
 logoutButton.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';
@@ -643,6 +786,12 @@ document.addEventListener('click', (event) => {
   const resumeButton = event.target.closest('.resume-batch');
   if (resumeButton) resumeBatch(resumeButton.dataset.batchId, resumeButton);
 
+  const markPreparedButton = event.target.closest('.mark-prepared');
+  if (markPreparedButton) updatePrepStatus(markPreparedButton.dataset.signature, markPreparedButton.dataset.label, markPreparedButton.dataset.package, true, markPreparedButton);
+
+  const undoPrepButton = event.target.closest('.undo-prep');
+  if (undoPrepButton) updatePrepStatus(undoPrepButton.dataset.signature, undoPrepButton.dataset.label, undoPrepButton.dataset.package, false, undoPrepButton);
+
   const copyButton = event.target.closest('.copy-tag');
   if (copyButton) {
     copyText(copyButton.dataset.tagName)
@@ -651,6 +800,25 @@ document.addEventListener('click', (event) => {
   }
 
 });
+document.addEventListener('change', (event) => {
+  const select = event.target.closest('.prep-package-select');
+  if (!select) return;
+  const customInput = select.parentElement.querySelector('.prep-package-custom');
+  if (select.value === '__custom__') {
+    customInput.hidden = false;
+    customInput.focus();
+    return;
+  }
+  customInput.hidden = true;
+  customInput.value = '';
+  updatePrepPackage(select.dataset.signature, select.dataset.label, select.value);
+});
+document.addEventListener('blur', (event) => {
+  const input = event.target.closest('.prep-package-custom');
+  if (!input || input.hidden) return;
+  const value = input.value.trim();
+  if (value) updatePrepPackage(input.dataset.signature, input.dataset.label, value);
+}, true);
 window.setInterval(() => {
   if ((batchState.active || []).length) renderBatches();
 }, 30000);
