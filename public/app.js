@@ -33,6 +33,7 @@ let portalConfig = {
   veeqo_orders_url: 'https://app.veeqo.com/orders',
   veeqo_tag_filter_url_template: ''
 };
+const collapseStorageKey = 'fillement_collapsed_sections';
 
 const sections = {
   batch: {
@@ -143,6 +144,38 @@ function escapeHtml(value) {
 
 function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function readCollapsedSections() {
+  try {
+    return new Set(JSON.parse(window.localStorage.getItem(collapseStorageKey) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsedSections(collapsed) {
+  window.localStorage.setItem(collapseStorageKey, JSON.stringify([...collapsed]));
+}
+
+function applyCollapsedSections() {
+  const collapsed = readCollapsedSections();
+  document.querySelectorAll('.collapsible-section').forEach((section) => {
+    const key = section.dataset.collapseKey;
+    const isCollapsed = collapsed.has(key);
+    section.classList.toggle('is-collapsed', isCollapsed);
+    section.querySelector('.collapse-toggle')?.setAttribute('aria-expanded', String(!isCollapsed));
+  });
+}
+
+function toggleCollapsedSection(section) {
+  const key = section.dataset.collapseKey;
+  if (!key) return;
+  const collapsed = readCollapsedSections();
+  if (collapsed.has(key)) collapsed.delete(key);
+  else collapsed.add(key);
+  writeCollapsedSections(collapsed);
+  applyCollapsedSections();
 }
 
 function packageControl(row) {
@@ -747,6 +780,12 @@ document.querySelectorAll('.view-button').forEach((button) => {
   });
 });
 document.addEventListener('click', (event) => {
+  const collapseButton = event.target.closest('.collapse-toggle');
+  if (collapseButton) {
+    toggleCollapsedSection(collapseButton.closest('.collapsible-section'));
+    return;
+  }
+
   const startButton = event.target.closest('.start-batch');
   if (startButton) startBatch(startButton.dataset.subBatchId, startButton);
 
@@ -800,4 +839,5 @@ window.setInterval(() => {
 }, 30000);
 loadPortalConfig()
   .then(loadLatest)
+  .then(applyCollapsedSections)
   .catch((error) => showToast(error.message));

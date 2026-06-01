@@ -45,89 +45,134 @@
       <section id="dashboardView" class="view active-view">
         <section class="summary-grid" id="summaryGrid"></section>
 
-        <section class="chart-section">
+        <section class="chart-section collapsible-section" data-collapse-key="orderMix">
         <div class="section-heading">
-          <h2>Order Mix</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Order Mix</h2>
+          </button>
           <span>Chart</span>
         </div>
-        <div id="chartBars" class="chart-bars"></div>
+        <div class="collapsible-content">
+          <div id="chartBars" class="chart-bars"></div>
+        </div>
         </section>
 
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="activeBatches">
         <div class="section-heading">
-          <h2>Active Batches</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Active Batches</h2>
+          </button>
           <span id="activeBatchCount">0</span>
         </div>
-        <div id="activeBatches" class="cluster-list"></div>
+        <div class="collapsible-content">
+          <div id="activeBatches" class="cluster-list"></div>
+        </div>
         </section>
 
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="completedBatches">
         <div class="section-heading">
-          <h2>Completed Batches</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Completed Batches</h2>
+          </button>
           <span id="completedBatchCount">0</span>
         </div>
-        <div id="completedBatches" class="cluster-list"></div>
+        <div class="collapsible-content">
+          <div id="completedBatches" class="cluster-list"></div>
+        </div>
         </section>
 
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="batchCandidates">
         <div class="section-heading">
-          <h2>Batch Candidates</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Batch Candidates</h2>
+          </button>
           <span id="batchCount">0</span>
         </div>
-        <div id="batchClusters" class="cluster-list"></div>
+        <div class="collapsible-content">
+          <div id="batchClusters" class="cluster-list"></div>
+        </div>
         </section>
 
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="borderlineClusters">
         <div class="section-heading">
-          <h2>Borderline Clusters</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Borderline Clusters</h2>
+          </button>
           <span id="borderlineCount">0</span>
         </div>
-        <div id="borderlineClusters" class="cluster-list"></div>
+        <div class="collapsible-content">
+          <div id="borderlineClusters" class="cluster-list"></div>
+        </div>
         </section>
 
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="multipackQueue">
         <div class="section-heading">
-          <h2>Multipack Queue</h2>
+          <button class="collapse-toggle" type="button" aria-expanded="true">
+            <span class="collapse-caret">▾</span>
+            <h2>Multipack Queue</h2>
+          </button>
           <span id="multipackCount">0</span>
         </div>
-        <div id="multipackClusters" class="cluster-list"></div>
+        <div class="collapsible-content">
+          <div id="multipackClusters" class="cluster-list"></div>
+        </div>
         </section>
       </section>
 
       <section id="prepView" class="view">
         <section class="summary-grid compact-grid" id="prepSummaryGrid"></section>
-        <section class="clusters prep-sheet">
+        <section class="clusters prep-sheet collapsible-section" data-collapse-key="prepAssembly">
           <div class="section-heading">
-            <h2>Prep / Assembly</h2>
+            <button class="collapse-toggle" type="button" aria-expanded="true">
+              <span class="collapse-caret">▾</span>
+              <h2>Prep / Assembly</h2>
+            </button>
             <div class="heading-actions">
               <span id="prepTableCount">0</span>
               <button id="printPrepButton" type="button">Print Prep Sheet</button>
             </div>
           </div>
-          <div class="notice">Prepare packages unsealed. Final sealing happens after labels are available.</div>
-          <div id="prepTable"></div>
+          <div class="collapsible-content">
+            <div class="notice">Prepare packages unsealed. Final sealing happens after labels are available.</div>
+            <div id="prepTable"></div>
+          </div>
         </section>
       </section>
 
       <section id="issuesView" class="view">
         <section class="summary-grid compact-grid" id="issueSummaryGrid"></section>
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="issueOrders">
           <div class="section-heading">
-            <h2>Orders Requiring Review</h2>
+            <button class="collapse-toggle" type="button" aria-expanded="true">
+              <span class="collapse-caret">▾</span>
+              <h2>Orders Requiring Review</h2>
+            </button>
             <span id="issueTableCount">0</span>
           </div>
-          <div id="issueTable"></div>
+          <div class="collapsible-content">
+            <div id="issueTable"></div>
+          </div>
         </section>
       </section>
 
       <section id="historyView" class="view">
         <section class="summary-grid compact-grid" id="historySummaryGrid"></section>
-        <section class="clusters">
+        <section class="clusters collapsible-section" data-collapse-key="batchHistory">
           <div class="section-heading">
-            <h2>Processed Batch History</h2>
+            <button class="collapse-toggle" type="button" aria-expanded="true">
+              <span class="collapse-caret">▾</span>
+              <h2>Processed Batch History</h2>
+            </button>
             <span id="historyTableCount">0</span>
           </div>
-          <div id="historyTable"></div>
+          <div class="collapsible-content">
+            <div id="historyTable"></div>
+          </div>
         </section>
       </section>
     </main>

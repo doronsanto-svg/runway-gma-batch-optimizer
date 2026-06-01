@@ -244,6 +244,36 @@ main {
   margin-bottom: 12px;
 }
 
+.collapse-toggle {
+  align-items: center;
+  background: transparent;
+  color: var(--ink);
+  display: inline-flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0;
+}
+
+.collapse-caret {
+  align-items: center;
+  background: var(--soft);
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 15px;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+}
+
+.collapsible-section.is-collapsed .collapse-caret {
+  transform: rotate(-90deg);
+}
+
+.collapsible-section.is-collapsed .collapsible-content {
+  display: none;
+}
+
 .heading-actions {
   align-items: center;
   display: flex;
