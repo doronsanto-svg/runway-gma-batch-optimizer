@@ -68,3 +68,13 @@ test('flags address review tags as hold issues', () => {
   assert.equal(issue.issue_types.includes('address'), true);
   assert.equal(issue.severity, 'hold');
 });
+
+test('flags generic hold tags as hold issues', () => {
+  const issue = analyzeOrderIssues(baseOrder({
+    tags: [{ name: 'Hold' }]
+  }));
+
+  assert.equal(issue.issue_types.includes('shipping'), true);
+  assert.equal(issue.severity, 'hold');
+  assert.equal(issue.hold, true);
+});

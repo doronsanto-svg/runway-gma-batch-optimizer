@@ -121,6 +121,16 @@ export function analyzeOrderIssues(order, config = {}) {
     });
   }
 
+  const manualHoldTagNames = tagNames.filter((name) => /(^|\b)(hold|customer hold|manual hold|order hold|do not ship|do-not-ship)(\b|$)/i.test(name));
+  if (manualHoldTagNames.length) {
+    issues.push({
+      type: 'shipping',
+      label: 'Manual Hold Tag',
+      severity: 'hold',
+      detail: manualHoldTagNames.join(', ')
+    });
+  }
+
   if (!issues.length) return null;
 
   return {
