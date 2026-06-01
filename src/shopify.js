@@ -28,9 +28,9 @@ function getOrderLookupKey(order) {
 }
 
 function getOrderSearchQuery(order) {
-  const number = clean(order?.number || order?.sales_record_number);
+  const number = clean(order?.number || order?.sales_record_number).replace(/^#/, '');
   if (!number) return '';
-  return `name:${number}`;
+  return `name:${number} OR name:#${number}`;
 }
 
 function isCacheFresh(entry, ttlMs) {

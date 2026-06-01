@@ -134,6 +134,7 @@ export async function runReadOnlyAnalysis(options = {}) {
   const refreshCarriers = Boolean(options.refreshCarriers);
   const useShippingRates = refreshCarriers || parseBoolean(options.useShippingRates ?? process.env.VEEQO_USE_SHIPPING_RATES, true);
   const rateConcurrency = Number.parseInt(process.env.VEEQO_RATE_LOOKUP_CONCURRENCY || '4', 10);
+  const shopifyIssueCacheTtlMs = Number.parseInt(process.env.SHOPIFY_ISSUE_CACHE_TTL_MS || '0', 10);
 
   let orders;
   let totalCount;
@@ -175,7 +176,9 @@ export async function runReadOnlyAnalysis(options = {}) {
   }
 
   const channelOrders = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
-  const { issueMap: shopifyIssueMap, summary: shopifyLookup } = await getShopifyIssueScan(channelOrders);
+  const { issueMap: shopifyIssueMap, summary: shopifyLookup } = await getShopifyIssueScan(channelOrders, {
+    ttlMs: Number.isFinite(shopifyIssueCacheTtlMs) && shopifyIssueCacheTtlMs >= 0 ? shopifyIssueCacheTtlMs : 0
+  });
   const issueConfig = {
     veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
     veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',

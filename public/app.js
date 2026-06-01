@@ -140,6 +140,19 @@ function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
+function shopifyLookupNotice(shopifyLookup = {}) {
+  if (!shopifyLookup.enabled) {
+    return '<div class="notice hold">Shopify lookup is off. Address review orders cannot be held out of batches until Shopify API credentials are added in Render.</div>';
+  }
+  if (Number(shopifyLookup.lookup_errors || 0) > 0) {
+    return `<div class="notice hold">Shopify lookup has ${escapeHtml(shopifyLookup.lookup_errors)} API error${Number(shopifyLookup.lookup_errors) === 1 ? '' : 's'}. Address holds may be incomplete.</div>`;
+  }
+  if (Number(shopifyLookup.checked || 0) > 0 && Number(shopifyLookup.matched || 0) === 0) {
+    return '<div class="notice hold">Shopify lookup is on, but no Veeqo orders matched Shopify orders. Address holds may be incomplete.</div>';
+  }
+  return '';
+}
+
 function activeBatchForSubBatch(subBatchId) {
   return (batchState.active || []).find((batch) => batch.sub_batch_id === subBatchId);
 }
@@ -156,6 +169,7 @@ function getHistoryTotals() {
 
 function renderSummary(report) {
   if (!report || report.empty) return;
+  document.querySelectorAll('.summary-notice').forEach((notice) => notice.remove());
   const currentOrderIds = new Set((report.actionable_batches || report.clusters || []).flatMap((batch) => batch.order_ids || []));
   const relevantCompleted = batchState.completed.filter((batch) => (batch.order_ids || []).some((id) => currentOrderIds.has(id)));
   const completedOrderCount = relevantCompleted.reduce((sum, batch) => sum + Number(batch.order_count || 0), 0);
@@ -201,6 +215,8 @@ function renderSummary(report) {
     metric('Total Forecast', minutes(report.summary.estimated_minutes)),
     metric('Generated', new Date(report.generated_at).toLocaleString())
   ].join('');
+  const notice = shopifyLookupNotice(shopifyLookup);
+  if (notice) summaryGrid.insertAdjacentHTML('beforebegin', notice.replace('class="notice', 'class="notice summary-notice'));
   renderTeamForecast();
   renderIssueView(report);
   renderHistoryView();
@@ -469,7 +485,8 @@ function renderIssueView(report = currentReport) {
     metric('Shopify Errors', shopifyLookup.lookup_errors ?? 0)
   ].join('');
   issueTableCount.textContent = issues.length;
-  issueTable.innerHTML = issues.length ? `
+  const notice = shopifyLookupNotice(shopifyLookup);
+  issueTable.innerHTML = `${notice}${issues.length ? `
     <div class="data-table">
       <div class="table-row table-head">
         <span>Order</span><span>Customer</span><span>Severity</span><span>Issues</span><span>Links</span>
@@ -487,7 +504,7 @@ function renderIssueView(report = currentReport) {
         </div>
       `).join('')}
     </div>
-  ` : '<p class="empty">No issue orders found in the current analysis.</p>';
+  ` : '<p class="empty">No issue orders found in the current analysis.</p>'}`;
 }
 
 function renderHistoryView() {

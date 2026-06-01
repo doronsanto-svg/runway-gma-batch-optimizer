@@ -219,6 +219,19 @@ main {
   line-height: 1.1;
 }
 
+.notice {
+  border: 1px solid var(--line);
+  font-weight: 800;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.notice.hold {
+  background: #fff6e3;
+  border-color: #f0c66c;
+  color: #633f00;
+}
+
 .clusters {
   border-top: 1px solid var(--line);
   padding: 22px 0;
