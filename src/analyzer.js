@@ -18,11 +18,12 @@ function parseBoolean(value, fallback = true) {
   return !['0', 'false', 'no', 'off'].includes(String(value).toLowerCase());
 }
 
-async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency = 4 } = {}) {
+async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency = 4, refresh = false } = {}) {
   let enriched = 0;
   let fallback = 0;
   let failed = 0;
   let cached = 0;
+  let cacheMiss = 0;
   const cache = readCarrierCache();
   let cacheChanged = false;
 
@@ -46,6 +47,12 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
         carrier_basis: 'shipping_rate_cache'
       };
       cached += 1;
+      return;
+    }
+
+    if (!refresh) {
+      cacheMiss += 1;
+      fallback += 1;
       return;
     }
 
@@ -84,7 +91,7 @@ async function enrichOrdersWithOperationalCarriers(orders, client, { concurrency
 
   if (cacheChanged) writeCarrierCache(cache);
 
-  return { enriched, cached, fallback, failed };
+  return { enriched, cached, cache_miss: cacheMiss, fallback, failed };
 }
 
 export function parseAnalyzeArgs(argv) {
@@ -115,7 +122,8 @@ export async function runReadOnlyAnalysis(options = {}) {
   const threshold = options.threshold || Number.parseInt(process.env.DEFAULT_THRESHOLD || String(DEFAULT_THRESHOLD), 10);
   const channelFilter = options.channel || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano';
   const requireGmaSkus = options.allSkus ? false : process.env.REQUIRE_GMA_SKUS !== 'false';
-  const useShippingRates = parseBoolean(options.useShippingRates ?? process.env.VEEQO_USE_SHIPPING_RATES, true);
+  const refreshCarriers = Boolean(options.refreshCarriers);
+  const useShippingRates = refreshCarriers || parseBoolean(options.useShippingRates ?? process.env.VEEQO_USE_SHIPPING_RATES, true);
   const rateConcurrency = Number.parseInt(process.env.VEEQO_RATE_LOOKUP_CONCURRENCY || '4', 10);
 
   let orders;
@@ -125,6 +133,8 @@ export async function runReadOnlyAnalysis(options = {}) {
   let carrierLookup = {
     basis: options.demo ? 'demo_delivery_method' : 'delivery_method_fallback',
     enriched: 0,
+    cached: 0,
+    cache_miss: 0,
     fallback: 0,
     failed: 0
   };
@@ -145,10 +155,11 @@ export async function runReadOnlyAnalysis(options = {}) {
     if (useShippingRates) {
       const channelOrdersForRates = orders.filter((order) => getOrderChannelName(order).toLowerCase() === channelFilter.toLowerCase());
       const result = await enrichOrdersWithOperationalCarriers(channelOrdersForRates, client, {
-        concurrency: Number.isFinite(rateConcurrency) && rateConcurrency > 0 ? rateConcurrency : 4
+        concurrency: Number.isFinite(rateConcurrency) && rateConcurrency > 0 ? rateConcurrency : 4,
+        refresh: refreshCarriers
       });
       carrierLookup = {
-        basis: 'shipping_rate_with_delivery_method_fallback',
+        basis: refreshCarriers ? 'shipping_rate_with_delivery_method_fallback' : 'fast_cached_delivery_fallback',
         ...result
       };
     }

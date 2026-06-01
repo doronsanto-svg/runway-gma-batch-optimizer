@@ -340,7 +340,8 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/analyze') {
       const { payload } = await runReadOnlyAnalysis({
         demo: url.searchParams.get('demo') === '1',
-        channel: url.searchParams.get('channel') || undefined
+        channel: url.searchParams.get('channel') || undefined,
+        refreshCarriers: url.searchParams.get('refresh_carriers') === '1'
       });
       sendJson(response, 200, payload);
       return;

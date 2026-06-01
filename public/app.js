@@ -1,5 +1,6 @@
 const summaryGrid = document.querySelector('#summaryGrid');
 const refreshButton = document.querySelector('#refreshButton');
+const carrierRefreshButton = document.querySelector('#carrierRefreshButton');
 const demoButton = document.querySelector('#demoButton');
 const logoutButton = document.querySelector('#logoutButton');
 const teamSizeInput = document.querySelector('#teamSizeInput');
@@ -172,8 +173,9 @@ function renderSummary(report) {
     metric('Pulled From Veeqo', report.orders_pulled ?? 0),
     metric('In This Channel', report.summary.source_orders ?? 0),
     metric('Included Orders', report.summary.included_orders ?? 0),
-    metric('Carrier Basis', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
-    metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new`),
+    metric('Sync Mode', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Carrier refresh' : 'Fast sync'),
+    metric('Carrier Basis', carrierLookup.basis === 'fast_cached_delivery_fallback' ? 'Cache + fallback' : carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
+    metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new / ${carrierLookup.cache_miss ?? 0} fallback`),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
     metric('All-Time Processed', totals.orders),
@@ -550,14 +552,16 @@ async function scanChannels() {
   }
 }
 
-async function refreshAnalysis({ demo = false } = {}) {
+async function refreshAnalysis({ demo = false, refreshCarriers = false } = {}) {
   refreshButton.disabled = true;
+  carrierRefreshButton.disabled = true;
   demoButton.disabled = true;
-  const activeButton = demo ? demoButton : refreshButton;
-  setButtonProcessing(activeButton, true, 'Analyzing...');
+  const activeButton = demo ? demoButton : refreshCarriers ? carrierRefreshButton : refreshButton;
+  setButtonProcessing(activeButton, true, refreshCarriers ? 'Refreshing...' : 'Analyzing...');
   try {
     const params = new URLSearchParams();
     if (demo) params.set('demo', '1');
+    if (refreshCarriers) params.set('refresh_carriers', '1');
     if (!demo && channelInput.value.trim()) params.set('channel', channelInput.value.trim());
     const response = await handleAuthResponse(await fetch(`/api/analyze?${params.toString()}`, { method: 'POST' }));
     const report = await response.json();
@@ -566,18 +570,20 @@ async function refreshAnalysis({ demo = false } = {}) {
     if (!demo && Number(report.summary?.included_orders || 0) === 0) {
       showToast(`No included orders. Pulled ${report.orders_pulled || 0}; channel matched ${report.summary?.source_orders || 0}.`);
     } else {
-      showToast(demo ? 'Demo analysis loaded.' : 'Read-only live analysis refreshed.');
+      showToast(demo ? 'Demo analysis loaded.' : refreshCarriers ? 'Carrier refresh complete.' : 'Fast live analysis refreshed.');
     }
   } catch (error) {
     showToast(error.message);
   } finally {
     refreshButton.disabled = false;
+    carrierRefreshButton.disabled = false;
     demoButton.disabled = false;
     setButtonProcessing(activeButton, false);
   }
 }
 
 refreshButton.addEventListener('click', () => refreshAnalysis());
+carrierRefreshButton.addEventListener('click', () => refreshAnalysis({ refreshCarriers: true }));
 demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
 channelScanButton.addEventListener('click', scanChannels);
 logoutButton.addEventListener('click', async () => {

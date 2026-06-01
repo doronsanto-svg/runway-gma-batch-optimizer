@@ -10,16 +10,6 @@ function getShipTo(order) {
   return order?.deliver_to || order?.shipping_address || order?.customer?.last_used_shipping_address || {};
 }
 
-function getPhone(order) {
-  const shipTo = getShipTo(order);
-  return firstPresent(
-    shipTo.phone,
-    order?.billing_address?.phone,
-    order?.customer?.phone,
-    order?.customer?.mobile
-  );
-}
-
 function getCustomerName(order) {
   const shipTo = getShipTo(order);
   return firstPresent(
@@ -82,15 +72,6 @@ export function analyzeOrderIssues(order, config = {}) {
   const tagText = tagNames.join(' ').toLowerCase();
   const shipTo = getShipTo(order);
 
-  if (!getPhone(order)) {
-    issues.push({
-      type: 'phone',
-      label: 'Phone Missing',
-      severity: 'warning',
-      detail: 'No customer, billing, or ship-to phone number found.'
-    });
-  }
-
   const missingAddressFields = getMissingAddressFields(order);
   if (missingAddressFields.length) {
     issues.push({
@@ -119,13 +100,15 @@ export function analyzeOrderIssues(order, config = {}) {
     });
   }
 
-  if (tagText.includes('fraud') || tagText.includes('risk')) {
-    const highRisk = tagText.includes('high') || tagText.includes('medium') || tagText.includes('review');
+  const riskTagNames = tagNames.filter((name) => /fraud|risk|review/i.test(name) && !/\blow\b/i.test(name));
+  if (riskTagNames.length) {
+    const riskText = riskTagNames.join(' ').toLowerCase();
+    const highRisk = riskText.includes('high') || riskText.includes('medium') || riskText.includes('review');
     issues.push({
       type: 'fraud',
       label: highRisk ? 'Fraud Review' : 'Fraud Risk',
       severity: highRisk ? 'hold' : 'warning',
-      detail: tagNames.filter((name) => /fraud|risk|review/i.test(name)).join(', ') || 'Fraud or risk tag present.'
+      detail: riskTagNames.join(', ') || 'Fraud or risk tag present.'
     });
   }
 
