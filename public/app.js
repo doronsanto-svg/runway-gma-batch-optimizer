@@ -142,6 +142,99 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
+function batchItemsForPrint(batch) {
+  const items = Array.isArray(batch.items) ? batch.items : [];
+  if (items.length) {
+    return items.map((item) => {
+      const name = item.name || item.title || item.sku || 'Item';
+      const quantity = Number(item.quantity || 1);
+      return quantity > 1 ? `${name} x ${quantity}` : name;
+    });
+  }
+
+  const carrierSuffix = batch.carrier_label ? ` · ${batch.carrier_label}` : '';
+  const label = carrierSuffix && batch.label?.endsWith(carrierSuffix)
+    ? batch.label.slice(0, -carrierSuffix.length)
+    : batch.label || 'Batch';
+  return label.split(' + ').map((item) => item.trim()).filter(Boolean);
+}
+
+function printBatchLabel(batchId) {
+  const batch = [...(batchState.active || []), ...(batchState.completed || [])].find((item) => item.id === batchId);
+  if (!batch) {
+    showToast('Batch not found.');
+    return;
+  }
+
+  const items = batchItemsForPrint(batch);
+  const content = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Batch Label</title>
+        <style>
+          @page { margin: 0; size: 4in 6in; }
+          * { box-sizing: border-box; }
+          body {
+            color: #111827;
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 0;
+          }
+          .label {
+            align-content: start;
+            display: grid;
+            gap: 0.18in;
+            height: 6in;
+            padding: 0.28in;
+            width: 4in;
+          }
+          .count {
+            font-size: 0.9in;
+            font-weight: 900;
+            line-height: 0.95;
+          }
+          .items {
+            display: grid;
+            gap: 0.12in;
+            font-size: 0.3in;
+            font-weight: 800;
+            line-height: 1.08;
+          }
+          .meta {
+            border-top: 1px solid #d1d5db;
+            color: #4b5563;
+            font-size: 0.15in;
+            font-weight: 700;
+            margin-top: 0.08in;
+            padding-top: 0.1in;
+          }
+        </style>
+      </head>
+      <body>
+        <section class="label">
+          <div class="count">${Number(batch.order_count || 0)})</div>
+          <div class="items">
+            ${items.map((item) => `<div>${escapeHtml(item)}</div>`).join('')}
+          </div>
+          <div class="meta">
+            ${escapeHtml(batch.carrier_label || 'Carrier')} · ${escapeHtml(batch.package || '')}<br>
+            ${escapeHtml(batch.tag_name || '')}
+          </div>
+        </section>
+      </body>
+    </html>
+  `;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    showToast('Print window blocked.');
+    return;
+  }
+  printWindow.document.write(content);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
 }
@@ -488,6 +581,7 @@ function renderBatches() {
         <div class="cell"><span>Elapsed</span><strong>${minutes(activeElapsedSeconds(batch) / 60)}</strong></div>
         <div class="cell"><span>Status</span><strong>${paused ? 'Paused' : 'Running'}</strong></div>
         <div class="batch-actions">
+          <button class="print-batch-label" type="button" data-batch-id="${escapeHtml(batch.id)}">Print Batch Label</button>
           <button class="complete-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Mark Complete</button>
           <button class="${paused ? 'resume-batch' : 'pause-batch'}" type="button" data-batch-id="${escapeHtml(batch.id)}">${paused ? 'Resume' : 'Pause'}</button>
           <button class="cancel-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Cancel</button>
@@ -515,6 +609,9 @@ function renderBatches() {
         <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
         <div class="cell"><span>Duration</span><strong>${minutes((batch.duration_seconds || 0) / 60)}</strong></div>
         <div class="cell"><span>Rate</span><strong>${Number(batch.orders_per_minute || 0).toFixed(1)}/min</strong></div>
+        <div class="batch-actions">
+          <button class="print-batch-label" type="button" data-batch-id="${escapeHtml(batch.id)}">Print Batch Label</button>
+        </div>
       </article>
     `).join('')
     : '<p class="empty">No completed batches yet.</p>';
@@ -806,6 +903,9 @@ document.addEventListener('click', (event) => {
 
   const startButton = event.target.closest('.start-batch');
   if (startButton) startBatch(startButton.dataset.subBatchId, startButton);
+
+  const printBatchLabelButton = event.target.closest('.print-batch-label');
+  if (printBatchLabelButton) printBatchLabel(printBatchLabelButton.dataset.batchId);
 
   const completeButton = event.target.closest('.complete-batch');
   if (completeButton) completeBatch(completeButton.dataset.batchId, completeButton);

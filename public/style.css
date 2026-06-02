@@ -87,6 +87,11 @@ button {
   background: var(--gold);
 }
 
+.print-batch-label {
+  background: var(--gold);
+  color: var(--navy);
+}
+
 .view-button.active {
   background: var(--mint);
 }

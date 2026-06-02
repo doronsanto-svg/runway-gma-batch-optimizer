@@ -435,6 +435,7 @@ const server = createServer(async (request, response) => {
         estimated_minutes: subBatch.estimated_minutes,
         order_ids: subBatch.order_ids,
         order_numbers: subBatch.order_numbers,
+        items: subBatch.items || [],
         tag_name: tagName,
         tag_id: tagId,
         started_at: new Date().toISOString(),
