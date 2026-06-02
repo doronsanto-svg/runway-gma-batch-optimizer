@@ -283,6 +283,19 @@ function batchItemsPerSet(batch) {
   return batchItemsForPrint(batch).reduce((sum, item) => sum + (Number(item.quantity || 1) * Number(item.pieces || 1)), 0);
 }
 
+function carrierPrintMarkup(selectedCarrier) {
+  if (selectedCarrier === 'USPS' || selectedCarrier === 'UPS') {
+    return `<div class="carrier-check carrier-single"><div class="carrier-box">${selectedCarrier}</div></div>`;
+  }
+
+  return `
+    <div class="carrier-check">
+      <div class="carrier-box">USPS</div>
+      <div class="carrier-box">UPS</div>
+    </div>
+  `;
+}
+
 function printBatchLabel(batchId) {
   const batch = [...(batchState.active || []), ...(batchState.completed || [])].find((item) => item.id === batchId);
   if (!batch) {
@@ -341,9 +354,12 @@ function printBatchLabel(batchId) {
             padding: 0.12in 0.04in;
             text-align: center;
           }
-          .carrier-box.selected {
-            background: #111827;
-            color: #ffffff;
+          .carrier-single {
+            grid-template-columns: 1fr;
+          }
+          .carrier-single .carrier-box {
+            font-size: 0.72in;
+            padding: 0.16in 0.04in;
           }
           .package {
             border: 3px solid #111827;
@@ -367,10 +383,7 @@ function printBatchLabel(batchId) {
         <section class="label">
           <div class="count">${setCount} sets</div>
           <div class="total">${itemsPerSet} items per set · ${totalItems} total items</div>
-          <div class="carrier-check">
-            <div class="carrier-box${selectedCarrier === 'USPS' ? ' selected' : ''}">USPS</div>
-            <div class="carrier-box${selectedCarrier === 'UPS' ? ' selected' : ''}">UPS</div>
-          </div>
+          ${carrierPrintMarkup(selectedCarrier)}
           <div class="package">${escapeHtml(batch.package || 'Package')}</div>
           <div class="items">
             ${items.map((item) => `<div>${escapeHtml(item.label)}</div>`).join('')}
@@ -454,9 +467,9 @@ function labelCarrierControl(batch) {
   const selected = batch.print_carrier || '';
   return `
     <select class="label-carrier-select" data-batch-id="${escapeHtml(batch.id)}">
-      <option value=""${selected ? '' : ' selected'}>Circle on label</option>
-      <option value="USPS"${selected === 'USPS' ? ' selected' : ''}>USPS</option>
-      <option value="UPS"${selected === 'UPS' ? ' selected' : ''}>UPS</option>
+      <option value=""${selected ? '' : ' selected'}>Show USPS + UPS</option>
+      <option value="USPS"${selected === 'USPS' ? ' selected' : ''}>Print USPS only</option>
+      <option value="UPS"${selected === 'UPS' ? ' selected' : ''}>Print UPS only</option>
     </select>
   `;
 }
