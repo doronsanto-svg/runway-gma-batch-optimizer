@@ -10,7 +10,7 @@ const settings = {
   },
   shippers: {
     '6x10 pouch': { name: '6x10 pouch', length: 10, width: 6, height: 1, weight_oz: 0.2 },
-    '8x12 pouch': { name: '8x12 pouch', length: 12, width: 8, height: 2, weight_oz: 0.3 },
+    '8x12 pouch': { name: '8x12 pouch', length: 12, width: 8, height: 1.5, weight_oz: 0.3 },
     '8x6x4 box': { name: '8x6x4 box', length: 8, width: 6, height: 4, weight_oz: 1 }
   }
 };
@@ -38,7 +38,7 @@ test('selectShipperForItems expands kit components before selecting shipper', ()
   ], settings);
 
   assert.equal(result.ok, true);
-  assert.equal(result.package, '8x12 pouch');
+  assert.equal(result.package, '6x10 pouch');
 });
 
 test('selectShipperForItems returns review when dimensions are missing', () => {
@@ -57,4 +57,15 @@ test('selectShipperForItems rotates packed dimensions across all axes', () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.package, '6x10 pouch');
+});
+
+test('selectShipperForItems moves larger flat stacks to the next pouch', () => {
+  const result = selectShipperForItems([
+    { sku: 'PL-RW-AA90-R', name: 'All Access', quantity: 1 },
+    { sku: 'PL-RW-SB15-R', name: 'Stage Bright', quantity: 1 },
+    { sku: 'PL-RW-FT72-R', name: 'Finishing Touch', quantity: 1 }
+  ], settings);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.package, '8x12 pouch');
 });

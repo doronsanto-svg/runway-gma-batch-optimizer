@@ -19,6 +19,10 @@ function hasDims(dims) {
   return dims.length > 0 && dims.width > 0 && dims.height > 0;
 }
 
+function isFlexibleShipper(shipper = {}) {
+  return /pouch|poly|mailer|envelope/i.test(String(shipper.name || ''));
+}
+
 function dimensionOrientations(dims) {
   const values = [dims.length, dims.width, dims.height];
   return [
@@ -37,6 +41,16 @@ function fits(packageDims, shipperDims) {
     && orientation.width <= shipperDims.width
     && orientation.height <= shipperDims.height
   ));
+}
+
+function fitsFlexible(units = [], shipperDims) {
+  const longestSide = Math.max(...units.map((unit) => unit.length));
+  const widestFace = Math.max(...units.map((unit) => unit.width));
+  const totalThickness = units.reduce((sum, unit) => sum + unit.height, 0);
+  const requiredWidth = widestFace + totalThickness;
+  const normal = longestSide <= shipperDims.length && requiredWidth <= shipperDims.width;
+  const rotated = longestSide <= shipperDims.width && requiredWidth <= shipperDims.length;
+  return normal || rotated;
 }
 
 function shipperVolume(shipper) {
@@ -93,7 +107,8 @@ export function calculatePackedDimensions(items = [], settings) {
     width: Math.max(...units.map((unit) => unit.width)),
     height: units.reduce((sum, unit) => sum + unit.height, 0),
     weight_oz: units.reduce((sum, unit) => sum + unit.weight_oz, 0),
-    unit_count: units.length
+    unit_count: units.length,
+    units
   };
 }
 
@@ -103,7 +118,11 @@ export function selectShipperForItems(items = [], settings) {
 
   const candidates = Object.values(settings.shippers || {})
     .filter((shipper) => hasDims(normalizeDims(shipper)))
-    .filter((shipper) => fits(packed, normalizeDims(shipper)))
+    .filter((shipper) => (
+      isFlexibleShipper(shipper)
+        ? fitsFlexible(packed.units || [], normalizeDims(shipper))
+        : fits(packed, normalizeDims(shipper))
+    ))
     .sort((a, b) => shipperVolume(a) - shipperVolume(b) || String(a.name).localeCompare(String(b.name)));
 
   if (!candidates.length) {
