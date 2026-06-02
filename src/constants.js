@@ -6,11 +6,62 @@ export const GMA_SKUS = {
   'PL-RW-RR50-R': { name: 'Radiance Ready', type: 'single' },
   'PL-RW-AA90-R': { name: 'All Access', type: 'single' },
   'PL-RW-FT72-R': { name: 'Finishing Touch', type: 'single' },
-  'PL-RW-TOR2-R': { name: 'Overnight Recovery kit', type: 'kit_small', pieces: 2 },
-  'PL-RW-TRE3-R': { name: 'Runway Essentials kit', type: 'kit_small', pieces: 3 },
-  'PL-RW-TGP4-R': { name: 'Glow Protocol kit', type: 'kit_large', pieces: 4 },
-  'PL-RW-TDTNR5-R': { name: 'Day-to-Night kit', type: 'kit_large', pieces: 5 },
-  'PL-RW-TFR7-R': { name: 'Full Runway kit', type: 'kit_large', pieces: 7 }
+  'PL-RW-TOR2-R': {
+    name: 'Overnight Recovery kit',
+    type: 'kit_small',
+    pieces: 2,
+    components: [
+      { name: 'All Access', quantity: 1 },
+      { name: 'Stage Bright', quantity: 1 }
+    ]
+  },
+  'PL-RW-TRE3-R': {
+    name: 'Runway Essentials kit',
+    type: 'kit_small',
+    pieces: 3,
+    components: [
+      { name: 'First Look', quantity: 1 },
+      { name: 'Spotlight', quantity: 1 },
+      { name: 'Radiance Ready', quantity: 1 }
+    ]
+  },
+  'PL-RW-TGP4-R': {
+    name: 'Glow Protocol kit',
+    type: 'kit_large',
+    pieces: 4,
+    components: [
+      { name: 'Behind the Scenes', quantity: 1 },
+      { name: 'Spotlight', quantity: 1 },
+      { name: 'Radiance Ready', quantity: 1 },
+      { name: 'Stage Bright', quantity: 1 }
+    ]
+  },
+  'PL-RW-TDTNR5-R': {
+    name: 'Day-to-Night kit',
+    type: 'kit_large',
+    pieces: 5,
+    components: [
+      { name: 'First Look', quantity: 1 },
+      { name: 'Behind the Scenes', quantity: 1 },
+      { name: 'Spotlight', quantity: 1 },
+      { name: 'Radiance Ready', quantity: 1 },
+      { name: 'All Access', quantity: 1 }
+    ]
+  },
+  'PL-RW-TFR7-R': {
+    name: 'Full Runway kit',
+    type: 'kit_large',
+    pieces: 7,
+    components: [
+      { name: 'First Look', quantity: 1 },
+      { name: 'Behind the Scenes', quantity: 1 },
+      { name: 'Spotlight', quantity: 1 },
+      { name: 'Radiance Ready', quantity: 1 },
+      { name: 'Stage Bright', quantity: 1 },
+      { name: 'All Access', quantity: 1 },
+      { name: 'Finishing Touch', quantity: 1 }
+    ]
+  }
 };
 
 export const SEED_PACK_RATES = {

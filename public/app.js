@@ -158,6 +158,21 @@ function itemLabel(item) {
   return item?.name || item?.title || item?.sku || 'Item';
 }
 
+function itemComponents(item) {
+  const components = Array.isArray(item?.components) ? item.components : [];
+  if (components.length) {
+    return components.map((component) => ({
+      label: component.name || component.title || component.sku || 'Item',
+      quantity: Number(component.quantity || 1)
+    }));
+  }
+
+  return [{
+    label: itemLabel(item),
+    quantity: Number(item?.pieces || 1)
+  }];
+}
+
 function prepItemLabels(row) {
   return (row?.items || [])
     .slice()
@@ -221,17 +236,30 @@ function kitStagingRowsForPrepRows(rows) {
         pieces_per_set: pieces,
         total_items: 0,
         source_rows: 0,
-        component_label: pieces > 1 ? 'Kit items' : label
+        components: new Map()
       };
       existing.set_count += sets;
       existing.total_items += sets * pieces;
       existing.source_rows += 1;
       existing.pieces_per_set = Math.max(existing.pieces_per_set, pieces);
+      itemComponents(item).forEach((component) => {
+        existing.components.set(
+          component.label,
+          (existing.components.get(component.label) || 0) + (sets * component.quantity)
+        );
+      });
       staged.set(key, existing);
     });
   });
 
   return [...staged.values()]
+    .map((row) => ({
+      ...row,
+      component_totals: [...row.components.entries()]
+        .map(([label, quantity]) => ({ label, quantity }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+      components: undefined
+    }))
     .sort((a, b) => b.set_count - a.set_count || a.label.localeCompare(b.label));
 }
 
@@ -243,7 +271,8 @@ function prepKitSummary(row) {
       const pieces = Number(item.pieces || 1);
       const setLabel = quantity > 1 ? `${label} x ${quantity}` : label;
       const totalItems = quantity * pieces;
-      const detail = totalItems > quantity ? `${quantity} set${quantity === 1 ? '' : 's'} / ${totalItems} items` : `${quantity} item${quantity === 1 ? '' : 's'}`;
+      const components = itemComponents(item).map((component) => `${component.label} x${component.quantity * quantity}`).join(', ');
+      const detail = totalItems > quantity ? `${totalItems} items: ${components}` : `${quantity} item${quantity === 1 ? '' : 's'}`;
       return `${setLabel}: ${detail}`;
     })
     .join('; ');
@@ -1077,10 +1106,10 @@ function printPrepSheet() {
         <h2>Kit / Item Staging</h2>
         <table>
           <thead>
-            <tr><th>Kit / Item</th><th>Sets to Stage</th><th>Each Set Contains</th><th>Total Items</th></tr>
+            <tr><th>Kit / Item</th><th>Sets to Stage</th><th>Items to Stage</th><th>Total Items</th></tr>
           </thead>
           <tbody>
-            ${kitStagingRows.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.set_count}</td><td>${item.pieces_per_set} ${escapeHtml(item.component_label)}</td><td>${item.total_items}</td></tr>`).join('')}
+            ${kitStagingRows.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.set_count}</td><td>${item.component_totals.map((component) => `${escapeHtml(component.label)}: ${component.quantity}`).join('<br>')}</td><td>${item.total_items}</td></tr>`).join('')}
           </tbody>
         </table>
         <h2>Selected Order Mixes</h2>

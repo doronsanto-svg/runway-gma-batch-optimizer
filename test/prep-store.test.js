@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeOrderLineItems } from '../src/clusterer.js';
 import { buildPrepRows, packageSuggestionForRow, prepKey, prepSummary, sortPrepRowsBySharedItems, stagingTotalsForPrepRows } from '../src/prep-store.js';
 
 const clusters = [
@@ -141,5 +142,26 @@ test('stagingTotalsForPrepRows multiplies quantities, pieces, and order count', 
   assert.deepEqual(totals, [
     { label: 'Overnight Recovery kit', quantity: 18 },
     { label: 'Behind the Scenes', quantity: 15 }
+  ]);
+});
+
+test('kit line items carry recipe components for prep staging', () => {
+  const [kit] = normalizeOrderLineItems({
+    line_items: [
+      {
+        quantity: 1,
+        sellable: {
+          sku_code: 'PL-RW-TOR2-R',
+          full_title: 'The Overnight Recovery'
+        }
+      }
+    ]
+  });
+
+  assert.equal(kit.name, 'Overnight Recovery kit');
+  assert.equal(kit.pieces, 2);
+  assert.deepEqual(kit.components, [
+    { name: 'All Access', quantity: 1 },
+    { name: 'Stage Bright', quantity: 1 }
   ]);
 });

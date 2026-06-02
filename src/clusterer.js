@@ -25,6 +25,7 @@ export function normalizeOrderLineItems(order) {
       name: GMA_SKUS[sku]?.name || titlesBySku.get(sku) || sku,
       title: titlesBySku.get(sku) || null,
       pieces: GMA_SKUS[sku]?.pieces || 1,
+      components: GMA_SKUS[sku]?.components || null,
       gma: Boolean(GMA_SKUS[sku])
     }));
 }
