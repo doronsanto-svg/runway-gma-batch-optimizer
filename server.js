@@ -181,6 +181,74 @@ function findActionableBatch(report, subBatchId) {
   return (report?.actionable_batches || report?.clusters || []).find((batch) => batch.sub_batch_id === subBatchId || batch.signature === subBatchId);
 }
 
+function unavailableOrderIds(store = readBatchStore()) {
+  return new Set([...(store.active || []), ...(store.completed || [])].flatMap((batch) => batch.order_ids || []));
+}
+
+function uniqueValues(values = []) {
+  return [...new Set(values.filter((value) => value !== undefined && value !== null && value !== ''))];
+}
+
+function buildCountBatchFromReport(report, orderCount, store = readBatchStore()) {
+  const targetCount = Number(orderCount || 0);
+  if (![1, 2, 3].includes(targetCount)) return null;
+
+  const subBatchId = `COUNT-${targetCount}`;
+  const existing = store.active.find((batch) => batch.sub_batch_id === subBatchId);
+  if (existing) return { existing, subBatchId };
+
+  const unavailableIds = unavailableOrderIds(store);
+  const sourceBatches = (report?.actionable_batches || report?.clusters || [])
+    .filter((batch) => Number(batch.order_count || 0) === targetCount);
+  const orderNumberById = new Map();
+  sourceBatches.forEach((batch) => {
+    (batch.order_ids || []).forEach((id, index) => {
+      orderNumberById.set(id, (batch.order_numbers || [])[index]);
+    });
+  });
+  const orderIds = uniqueValues(sourceBatches.flatMap((batch) => batch.order_ids || []))
+    .filter((id) => !unavailableIds.has(id));
+  const orderNumbers = orderIds.map((id) => orderNumberById.get(id)).filter(Boolean);
+  const includedSources = sourceBatches.filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)));
+
+  if (!includedSources.length || !orderIds.length) {
+    return { subBatchId, batch: null };
+  }
+
+  const carrierLabels = uniqueValues(includedSources.map((batch) => batch.carrier_label || 'Unknown'));
+  const label = `${targetCount}-Order Quick Batch`;
+  const station = uniqueValues(includedSources.map((batch) => batch.station || '').filter(Boolean)).join(' / ') || 'Mixed';
+  const packages = uniqueValues(includedSources.map((batch) => batch.package || '').filter(Boolean));
+  return {
+    subBatchId,
+    batch: {
+      sub_batch_id: subBatchId,
+      signature: subBatchId,
+      carrier: 'mixed',
+      carrier_label: carrierLabels.length === 1 ? carrierLabels[0] : 'Mixed',
+      label,
+      category: 'quick_count',
+      station,
+      package: packages.length === 1 ? packages[0] : 'Mixed',
+      order_count: orderIds.length,
+      source_batch_count: includedSources.length,
+      source_order_count: targetCount,
+      total_revenue: includedSources.reduce((sum, batch) => sum + Number(batch.total_revenue || 0), 0),
+      estimated_minutes: includedSources.reduce((sum, batch) => sum + Number(batch.estimated_minutes || 0), 0),
+      order_ids: orderIds,
+      order_numbers: orderNumbers,
+      items: [],
+      source_batches: includedSources.map((batch) => ({
+        sub_batch_id: batch.sub_batch_id,
+        signature: batch.signature,
+        label: batch.label,
+        order_count: batch.order_count,
+        order_ids: batch.order_ids || []
+      }))
+    }
+  };
+}
+
 function findStoredBatch(batchId) {
   const store = readBatchStore();
   return [...store.active, ...store.completed, ...store.canceled].find((batch) => batch.id === batchId);
@@ -463,6 +531,53 @@ const server = createServer(async (request, response) => {
         order_ids: subBatch.order_ids,
         order_numbers: subBatch.order_numbers,
         items: subBatch.items || [],
+        tag_name: tagName,
+        tag_id: tagId,
+        started_at: new Date().toISOString(),
+        pause_seconds: 0,
+        paused_at: null,
+        cleanup_status: live ? 'pending' : 'not_needed'
+      });
+
+      sendJson(response, 200, { batch });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/batches/by-count') {
+      const body = await readJsonBody(request);
+      const report = readLatestReport();
+      const store = readBatchStore();
+      const quickBatch = buildCountBatchFromReport(report, body.order_count, store);
+      if (!quickBatch) {
+        sendJson(response, 400, { error: 'Order count must be 1, 2, or 3.' });
+        return;
+      }
+      if (quickBatch.existing) {
+        sendJson(response, 200, { batch: quickBatch.existing });
+        return;
+      }
+      if (!quickBatch.batch) {
+        sendJson(response, 404, { error: `No current ${body.order_count}-order batches are available to tag.` });
+        return;
+      }
+
+      const live = report.data_source !== 'demo test data';
+      const tagName = live
+        ? `BATCH-COUNT-${tagSafe(body.order_count)}-${Date.now()}`
+        : `DEMO-COUNT-${tagSafe(body.order_count)}-${Date.now()}`;
+      let tagId = null;
+
+      if (live) {
+        const client = makeVeeqoClient();
+        const tag = await client.findOrCreateTag({ name: tagName, colour: '#f5df9e' });
+        tagId = tag.id;
+        await client.tagOrders({ orderIds: quickBatch.batch.order_ids, tagIds: [tag.id] });
+      }
+
+      const batch = createBatchRecord({
+        mode: live ? 'live' : 'demo',
+        status: 'active',
+        ...quickBatch.batch,
         tag_name: tagName,
         tag_id: tagId,
         started_at: new Date().toISOString(),

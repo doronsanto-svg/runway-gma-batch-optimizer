@@ -25,6 +25,7 @@ const historySummaryGrid = document.querySelector('#historySummaryGrid');
 const historyTable = document.querySelector('#historyTable');
 const historyTableCount = document.querySelector('#historyTableCount');
 const toast = document.querySelector('#statusToast');
+const quickBatchActions = document.querySelector('#quickBatchActions');
 
 let currentReport = null;
 let batchState = { active: [], completed: [] };
@@ -569,6 +570,49 @@ function visibleActionableBatches(report = currentReport) {
   return actionable.filter((cluster) => !isClusterFullyCompleted(cluster));
 }
 
+function activeBatchForCount(orderCount) {
+  return (batchState.active || []).find((batch) => batch.sub_batch_id === `COUNT-${orderCount}`);
+}
+
+function quickCountSummary(orderCount, report = currentReport) {
+  const unavailableIds = new Set([...activeBatchOrderIds(), ...completedOrderIdsInState()]);
+  const matchingRows = visibleActionableBatches(report)
+    .filter((cluster) => Number(cluster.order_count || 0) === Number(orderCount || 0));
+  const availableOrderIds = new Set();
+  matchingRows.forEach((cluster) => {
+    (cluster.order_ids || []).forEach((id) => {
+      if (!unavailableIds.has(id)) availableOrderIds.add(id);
+    });
+  });
+  return {
+    rows: matchingRows.filter((cluster) => (cluster.order_ids || []).some((id) => availableOrderIds.has(id))).length,
+    orders: availableOrderIds.size
+  };
+}
+
+function renderQuickBatchActions(report = currentReport) {
+  if (!quickBatchActions) return;
+  if (!report || report.empty) {
+    quickBatchActions.innerHTML = '<span class="quick-batch-empty">Run Live Re-analyze first.</span>';
+    return;
+  }
+
+  quickBatchActions.innerHTML = [1, 2, 3].map((orderCount) => {
+    const active = activeBatchForCount(orderCount);
+    const summary = quickCountSummary(orderCount, report);
+    const disabled = active || !summary.orders;
+    const detail = active
+      ? `Active tag: ${active.tag_name}`
+      : `${summary.rows} rows · ${summary.orders} orders`;
+    return `
+      <button class="quick-count-batch" type="button" data-order-count="${orderCount}"${disabled ? ' disabled' : ''}>
+        <strong>${orderCount}-count batch</strong>
+        <span>${escapeHtml(detail)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
 function getHistoryTotals() {
   const completed = batchState.completed || [];
   return {
@@ -676,6 +720,7 @@ function renderReportSections(report) {
   renderSection('batch', actionable.filter((cluster) => cluster.bucket === 'batch'));
   renderSection('borderline', actionable.filter((cluster) => cluster.bucket === 'borderline'));
   renderSection('multipack', actionable.filter((cluster) => cluster.bucket === 'multipack'));
+  renderQuickBatchActions(report);
 }
 
 function renderReport(report) {
@@ -685,6 +730,7 @@ function renderReport(report) {
       section.count.textContent = '0';
       section.list.innerHTML = '<p class="empty">Run an analysis first.</p>';
     });
+    renderQuickBatchActions(null);
     renderIssueView(null);
     renderHistoryView();
     return;
@@ -747,6 +793,30 @@ async function startBatch(subBatchId, button) {
       showToast(`Batch started and tag copied: ${result.batch.tag_name}`);
     } catch {
       showToast(`Batch started: ${result.batch.tag_name}`);
+    }
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
+async function startCountBatch(orderCount, button) {
+  setButtonProcessing(button, true, 'Starting...');
+  try {
+    const response = await handleAuthResponse(await fetch('/api/batches/by-count', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_count: Number(orderCount) })
+    }));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Failed to start count batch');
+    await loadBatches();
+    try {
+      await copyText(result.batch.tag_name);
+      showToast(`Count batch started and tag copied: ${result.batch.tag_name}`);
+    } catch {
+      showToast(`Count batch started: ${result.batch.tag_name}`);
     }
   } catch (error) {
     showToast(error.message);
@@ -1390,6 +1460,9 @@ document.addEventListener('click', (event) => {
 
   const startButton = event.target.closest('.start-batch');
   if (startButton) startBatch(startButton.dataset.subBatchId, startButton);
+
+  const quickCountButton = event.target.closest('.quick-count-batch');
+  if (quickCountButton) startCountBatch(quickCountButton.dataset.orderCount, quickCountButton);
 
   const printBatchLabelButton = event.target.closest('.print-batch-label');
   if (printBatchLabelButton) printBatchLabel(printBatchLabelButton.dataset.batchId);

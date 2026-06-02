@@ -237,6 +237,55 @@ main {
   color: #633f00;
 }
 
+.quick-batch-panel {
+  align-items: center;
+  border: 1px solid var(--line);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin-bottom: 22px;
+  padding: 14px 16px;
+}
+
+.quick-batch-panel h2 {
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.quick-batch-panel p,
+.quick-batch-empty {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quick-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.quick-count-batch {
+  align-items: flex-start;
+  border: 1px solid var(--navy);
+  display: grid;
+  gap: 3px;
+  min-width: 160px;
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.quick-count-batch strong {
+  font-size: 14px;
+}
+
+.quick-count-batch span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .clusters {
   border-top: 1px solid var(--line);
   padding: 22px 0;
