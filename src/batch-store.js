@@ -95,6 +95,39 @@ export function completeBatchRecord(batchId, updates) {
   return completed;
 }
 
+export function reopenCompletedBatchRecord(identifier, updates = {}) {
+  const store = readBatchStore();
+  const index = store.completed.findIndex((batch) => (
+    batch.id === identifier ||
+    batch.tag_name === identifier ||
+    String(batch.tag_id || '') === String(identifier || '')
+  ));
+  if (index === -1) return null;
+
+  const [completed] = store.completed.splice(index, 1);
+  const {
+    completed_at: completedAt,
+    duration_seconds: durationSeconds,
+    orders_per_minute: ordersPerMinute,
+    ...rest
+  } = completed;
+
+  const reopened = {
+    ...rest,
+    ...updates,
+    status: updates.status || 'paused',
+    paused_at: updates.paused_at || new Date().toISOString(),
+    reopened_at: updates.reopened_at || new Date().toISOString(),
+    reopened_from_completed_at: completedAt || null,
+    reopened_duration_seconds: durationSeconds || null,
+    reopened_orders_per_minute: ordersPerMinute || null
+  };
+
+  store.active.unshift(reopened);
+  writeBatchStore(store);
+  return reopened;
+}
+
 export function updateActiveBatchRecord(batchId, updates) {
   const store = readBatchStore();
   const index = store.active.findIndex((batch) => batch.id === batchId);

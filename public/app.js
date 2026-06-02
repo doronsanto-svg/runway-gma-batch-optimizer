@@ -720,6 +720,21 @@ async function completeBatch(batchId, button) {
   }
 }
 
+async function reopenBatch(batchId, button) {
+  setButtonProcessing(button, true, 'Reopening...');
+  try {
+    const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/reopen`, { method: 'POST' }));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Failed to reopen batch');
+    await loadBatches();
+    showToast(`Batch reopened as paused. Tag status: ${result.batch.cleanup_status}`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 async function cancelBatch(batchId, button) {
   setButtonProcessing(button, true, 'Canceling...');
   try {
@@ -896,6 +911,7 @@ function renderBatches() {
         <div class="cell"><span>Rate</span><strong>${Number(batch.orders_per_minute || 0).toFixed(1)}/min</strong></div>
         <div class="batch-actions">
           <button class="print-batch-label" type="button" data-batch-id="${escapeHtml(batch.id)}">Print Batch Label</button>
+          <button class="reopen-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Reopen</button>
         </div>
       </article>
     `).join('')
@@ -1185,7 +1201,7 @@ function renderHistoryView() {
   historyTable.innerHTML = completed.length ? `
     <div class="data-table history-table">
       <div class="table-row table-head">
-        <span>Batch</span><span>Tag</span><span>Orders</span><span>Carrier</span><span>Estimate</span><span>Actual</span><span>Completed</span><span>Cleanup</span>
+        <span>Batch</span><span>Tag</span><span>Orders</span><span>Carrier</span><span>Estimate</span><span>Actual</span><span>Completed</span><span>Cleanup</span><span>Action</span>
       </div>
       ${completed.map((batch) => `
         <div class="table-row history-row">
@@ -1197,6 +1213,7 @@ function renderHistoryView() {
           <span>${minutes((batch.duration_seconds || 0) / 60)}</span>
           <span>${batch.completed_at ? new Date(batch.completed_at).toLocaleString() : ''}</span>
           <span>${escapeHtml(batch.cleanup_status || '')}</span>
+          <span><button class="reopen-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Reopen</button></span>
         </div>
       `).join('')}
     </div>
@@ -1322,6 +1339,9 @@ document.addEventListener('click', (event) => {
 
   const completeButton = event.target.closest('.complete-batch');
   if (completeButton) completeBatch(completeButton.dataset.batchId, completeButton);
+
+  const reopenButton = event.target.closest('.reopen-batch');
+  if (reopenButton) reopenBatch(reopenButton.dataset.batchId, reopenButton);
 
   const cancelButton = event.target.closest('.cancel-batch');
   if (cancelButton) cancelBatch(cancelButton.dataset.batchId, cancelButton);

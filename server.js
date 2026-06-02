@@ -5,7 +5,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { loadEnv } from './src/env.js';
 import { readLatestReport } from './src/report.js';
 import { applyPackageStateToReport, runReadOnlyAnalysis } from './src/analyzer.js';
-import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord, updateStoredBatchRecord } from './src/batch-store.js';
+import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, reopenCompletedBatchRecord, updateActiveBatchRecord, updateStoredBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
@@ -506,6 +506,32 @@ const server = createServer(async (request, response) => {
       });
 
       sendJson(response, 200, { batch: completed });
+      return;
+    }
+
+    const reopenMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/reopen$/);
+    if (request.method === 'POST' && reopenMatch) {
+      const batchId = decodeURIComponent(reopenMatch[1]);
+      const store = readBatchStore();
+      const completed = store.completed.find((batch) => batch.id === batchId || batch.tag_name === batchId || String(batch.tag_id || '') === batchId);
+      if (!completed) {
+        sendJson(response, 404, { error: 'Completed batch not found.' });
+        return;
+      }
+
+      let cleanupStatus = completed.cleanup_status;
+      if (completed.mode === 'live' && completed.tag_id) {
+        const client = makeVeeqoClient();
+        await client.tagOrders({ orderIds: completed.order_ids, tagIds: [completed.tag_id] });
+        cleanupStatus = 'restored';
+      }
+
+      const reopened = reopenCompletedBatchRecord(batchId, {
+        status: 'paused',
+        paused_at: new Date().toISOString(),
+        cleanup_status: cleanupStatus
+      });
+      sendJson(response, 200, { batch: reopened });
       return;
     }
 
