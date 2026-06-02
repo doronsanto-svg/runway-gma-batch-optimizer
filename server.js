@@ -8,7 +8,7 @@ import { runReadOnlyAnalysis } from './src/analyzer.js';
 import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
-import { buildPrepRows, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
+import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
 
 loadEnv();
 
@@ -370,7 +370,9 @@ const server = createServer(async (request, response) => {
       setPackageOverride({
         signature: body.signature,
         label: body.label || '',
-        packageName: body.package || ''
+        packageName: body.package || '',
+        category: body.category || '',
+        items: Array.isArray(body.items) ? body.items : []
       });
       sendJson(response, 200, latestPrepPayload());
       return;
@@ -400,6 +402,8 @@ const server = createServer(async (request, response) => {
         sendJson(response, 404, { error: 'Sub-batch not found in latest analysis.' });
         return;
       }
+      const packageSuggestion = packageSuggestionForRow(subBatch, readPrepStore());
+      const packageName = packageSuggestion.packageName || subBatch.package;
 
       const live = report.data_source !== 'demo test data';
       const tagName = live
@@ -429,7 +433,7 @@ const server = createServer(async (request, response) => {
         label: subBatch.label,
         category: subBatch.category,
         station: subBatch.station,
-        package: subBatch.package,
+        package: packageName,
         order_count: subBatch.order_count,
         total_revenue: subBatch.total_revenue,
         estimated_minutes: subBatch.estimated_minutes,

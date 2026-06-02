@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPrepRows, prepKey, prepSummary } from '../src/prep-store.js';
+import { buildPrepRows, packageSuggestionForRow, prepKey, prepSummary } from '../src/prep-store.js';
 
 const clusters = [
   {
@@ -41,6 +41,31 @@ test('buildPrepRows applies package overrides by signature', () => {
   assert.equal(combo.package, '8x6x4 box');
   assert.equal(combo.default_package, '8x12 pouch if it fits');
   assert.equal(combo.package_overridden, true);
+});
+
+test('packageSuggestionForRow learns from similar category and item count', () => {
+  const suggestion = packageSuggestionForRow({
+    signature: 'SKU-D:1|KIT-E:1',
+    category: 'combo',
+    package: '8x12 pouch if it fits',
+    items: [
+      { sku: 'SKU-D', quantity: 1, pieces: 1 },
+      { sku: 'KIT-E', quantity: 1, pieces: 2 }
+    ]
+  }, {
+    package_overrides: {},
+    package_memory: {
+      signatures: {},
+      groups: {
+        'combo::3': { selected_package: '8x6x4 box' }
+      },
+      categories: {}
+    },
+    prepared: {}
+  });
+
+  assert.equal(suggestion.packageName, '8x6x4 box');
+  assert.equal(suggestion.source, 'similar_memory');
 });
 
 test('buildPrepRows marks prepared rows by signature and package', () => {

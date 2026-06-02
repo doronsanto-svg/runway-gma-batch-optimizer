@@ -7,7 +7,7 @@ const storePath = resolve(dataDir, 'prep-state.json');
 export const PACKAGE_OPTIONS = ['6x10 pouch', '8x12 pouch', '8x6x4 box'];
 
 function emptyStore() {
-  return { package_overrides: {}, prepared: {} };
+  return { package_overrides: {}, package_memory: { signatures: {}, groups: {}, categories: {} }, prepared: {} };
 }
 
 export function prepKey(signature, packageName) {
@@ -16,7 +16,9 @@ export function prepKey(signature, packageName) {
 
 export function readPrepStore() {
   if (!existsSync(storePath)) return emptyStore();
-  return { ...emptyStore(), ...JSON.parse(readFileSync(storePath, 'utf8')) };
+  const store = { ...emptyStore(), ...JSON.parse(readFileSync(storePath, 'utf8')) };
+  store.package_memory = { ...emptyStore().package_memory, ...(store.package_memory || {}) };
+  return store;
 }
 
 export function writePrepStore(store) {
@@ -24,7 +26,66 @@ export function writePrepStore(store) {
   writeFileSync(storePath, JSON.stringify(store, null, 2));
 }
 
-export function setPackageOverride({ signature, label, packageName }) {
+function itemUnits(items = []) {
+  return (items || []).reduce((sum, item) => sum + (Number(item.quantity || 1) * Number(item.pieces || 1)), 0);
+}
+
+function groupKey({ category, items = [] }) {
+  return `${category || 'unknown'}::${itemUnits(items) || 0}`;
+}
+
+function recordPackageMemory(store, { signature, label, packageName, category, items }) {
+  const cleanPackage = String(packageName || '').trim();
+  if (!cleanPackage) return;
+  const now = new Date().toISOString();
+  const units = itemUnits(items);
+  const group = groupKey({ category, items });
+  const memoryTargets = [
+    ['signatures', signature],
+    ['groups', group],
+    ['categories', category || 'unknown']
+  ];
+
+  for (const [bucket, key] of memoryTargets) {
+    if (!key) continue;
+    const existing = store.package_memory[bucket][key] || {
+      key,
+      label,
+      category: category || 'unknown',
+      item_units: units,
+      package_counts: {},
+      selected_package: cleanPackage,
+      updated_at: now
+    };
+    existing.package_counts[cleanPackage] = (existing.package_counts[cleanPackage] || 0) + 1;
+    existing.selected_package = Object.entries(existing.package_counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+    existing.updated_at = now;
+    store.package_memory[bucket][key] = existing;
+  }
+}
+
+function packageSuggestionForCluster(cluster, store) {
+  const exact = store.package_overrides?.[cluster.signature]?.package;
+  if (exact) return { packageName: exact, source: 'exact' };
+
+  const signatureMemory = store.package_memory?.signatures?.[cluster.signature]?.selected_package;
+  if (signatureMemory) return { packageName: signatureMemory, source: 'signature_memory' };
+
+  const groupMemory = store.package_memory?.groups?.[groupKey(cluster)]?.selected_package;
+  if (groupMemory) return { packageName: groupMemory, source: 'similar_memory' };
+
+  const categoryMemory = store.package_memory?.categories?.[cluster.category || 'unknown']?.selected_package;
+  if (categoryMemory) return { packageName: categoryMemory, source: 'category_memory' };
+
+  return { packageName: cluster.package, source: 'default' };
+}
+
+export function packageSuggestionForRow(row, store = readPrepStore()) {
+  return packageSuggestionForCluster(row, store);
+}
+
+export function setPackageOverride({ signature, label, packageName, category = '', items = [] }) {
   const store = readPrepStore();
   const cleanPackage = String(packageName || '').trim();
   if (!cleanPackage) {
@@ -34,8 +95,11 @@ export function setPackageOverride({ signature, label, packageName }) {
       signature,
       label,
       package: cleanPackage,
+      category,
+      item_units: itemUnits(items),
       updated_at: new Date().toISOString()
     };
+    recordPackageMemory(store, { signature, label, packageName: cleanPackage, category, items });
   }
   writePrepStore(store);
   return store;
@@ -58,8 +122,8 @@ export function setPreparedStatus({ signature, label, packageName, prepared }) {
 
 export function buildPrepRows(clusters, store = readPrepStore()) {
   return (clusters || []).map((cluster) => {
-    const override = store.package_overrides?.[cluster.signature];
-    const packageName = override?.package || cluster.package;
+    const suggestion = packageSuggestionForCluster(cluster, store);
+    const packageName = suggestion.packageName;
     const key = prepKey(cluster.signature, packageName);
     const preparedRecord = store.prepared?.[key] || {};
     return {
@@ -69,7 +133,8 @@ export function buildPrepRows(clusters, store = readPrepStore()) {
       category: cluster.category,
       package: packageName,
       default_package: cluster.package,
-      package_overridden: Boolean(override?.package),
+      package_overridden: suggestion.source === 'exact',
+      package_suggestion_source: suggestion.source,
       package_options: PACKAGE_OPTIONS,
       station: cluster.station,
       order_count: cluster.order_count,

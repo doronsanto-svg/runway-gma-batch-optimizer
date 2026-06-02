@@ -325,13 +325,22 @@ function packageControl(row, mode = 'prep') {
   const options = [...new Set([...(row.package_options || []), row.package].filter(Boolean))];
   const selectOptions = options.map((option) => `<option value="${escapeHtml(option)}"${option === row.package ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('');
   const customValue = row.package_options?.includes(row.package) ? '' : row.package;
+  const suggestionLabels = {
+    exact: 'Saved choice',
+    signature_memory: 'Saved choice',
+    similar_memory: 'Learned suggestion',
+    category_memory: 'Category suggestion',
+    default: 'Recommended'
+  };
+  const suggestionLabel = suggestionLabels[row.package_suggestion_source] || (row.package_overridden ? 'Saved choice' : 'Recommended');
   return `
     <div class="package-control">
-      <select class="${mode}-package-select" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}">
+      <select class="${mode}-package-select" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-category="${escapeHtml(row.category || '')}" data-items="${escapeHtml(JSON.stringify(row.items || []))}">
         ${selectOptions}
         <option value="__custom__"${customValue ? ' selected' : ''}>Custom</option>
       </select>
-      <input class="${mode}-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
+      <input class="${mode}-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-category="${escapeHtml(row.category || '')}" data-items="${escapeHtml(JSON.stringify(row.items || []))}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
+      <small>${escapeHtml(suggestionLabel)}</small>
     </div>
   `;
 }
@@ -716,11 +725,19 @@ async function loadPrep() {
   renderPrepView();
 }
 
-async function updatePrepPackage(signature, label, packageName) {
+function parseDataItems(value) {
+  try {
+    return JSON.parse(value || '[]');
+  } catch {
+    return [];
+  }
+}
+
+async function updatePrepPackage(signature, label, packageName, category = '', items = []) {
   const response = await handleAuthResponse(await fetch('/api/prep/package', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signature, label, package: packageName })
+    body: JSON.stringify({ signature, label, package: packageName, category, items })
   }));
   prepState = await response.json();
   renderPrepView();
@@ -739,16 +756,17 @@ function updateRowsPackage(rows, signature, packageName) {
       ...row,
       package: packageName,
       package_overridden: true,
+      package_suggestion_source: 'exact',
       sub_batches: updateRowsPackage(row.sub_batches, signature, packageName)
     };
   });
 }
 
-async function updateBatchPackage(signature, label, packageName) {
+async function updateBatchPackage(signature, label, packageName, category = '', items = []) {
   const response = await handleAuthResponse(await fetch('/api/prep/package', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signature, label, package: packageName })
+    body: JSON.stringify({ signature, label, package: packageName, category, items })
   }));
   prepState = await response.json();
   if (currentReport) {
@@ -1033,16 +1051,18 @@ document.addEventListener('change', (event) => {
   }
   input.hidden = true;
   input.value = '';
-  if (select.classList.contains('batch-package-select')) updateBatchPackage(select.dataset.signature, select.dataset.label, select.value);
-  else updatePrepPackage(select.dataset.signature, select.dataset.label, select.value);
+  const items = parseDataItems(select.dataset.items);
+  if (select.classList.contains('batch-package-select')) updateBatchPackage(select.dataset.signature, select.dataset.label, select.value, select.dataset.category, items);
+  else updatePrepPackage(select.dataset.signature, select.dataset.label, select.value, select.dataset.category, items);
 });
 document.addEventListener('blur', (event) => {
   const input = event.target.closest('.prep-package-custom, .batch-package-custom');
   if (!input || input.hidden) return;
   const value = input.value.trim();
   if (!value) return;
-  if (input.classList.contains('batch-package-custom')) updateBatchPackage(input.dataset.signature, input.dataset.label, value);
-  else updatePrepPackage(input.dataset.signature, input.dataset.label, value);
+  const items = parseDataItems(input.dataset.items);
+  if (input.classList.contains('batch-package-custom')) updateBatchPackage(input.dataset.signature, input.dataset.label, value, input.dataset.category, items);
+  else updatePrepPackage(input.dataset.signature, input.dataset.label, value, input.dataset.category, items);
 }, true);
 window.setInterval(() => {
   if ((batchState.active || []).length) renderBatches();
