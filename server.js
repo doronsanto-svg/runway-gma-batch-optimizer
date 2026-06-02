@@ -296,8 +296,9 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
           sub_batch_id: batch.sub_batch_id,
           signature: batch.signature,
           label: batch.label,
-          order_count: batch.order_count,
-          order_ids: batch.order_ids || []
+          order_count: (batch.order_ids || []).length,
+          order_ids: batch.order_ids || [],
+          items: batch.items || []
         }))
       };
     })

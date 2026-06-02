@@ -26,6 +26,7 @@ const historyTable = document.querySelector('#historyTable');
 const historyTableCount = document.querySelector('#historyTableCount');
 const toast = document.querySelector('#statusToast');
 const quickBatchActions = document.querySelector('#quickBatchActions');
+const unitBreakdown = document.querySelector('#unitBreakdown');
 
 let currentReport = null;
 let batchState = { active: [], completed: [] };
@@ -52,6 +53,10 @@ const prepMatrixColumns = [
   { key: 'radiance', header: 'RADIANCE', labels: ['radiance ready'] },
   { key: 'first_look', header: 'FIRST LOOK', labels: ['first look'] }
 ];
+const unitProductColumns = prepMatrixColumns.map((column) => ({
+  ...column,
+  label: column.labels[0].split(' ').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}));
 const prepMatrixColumnByLabel = prepMatrixColumns.reduce((lookup, column) => {
   column.labels.forEach((label) => lookup.set(label, column.key));
   return lookup;
@@ -291,6 +296,78 @@ function prepMatrixQuantityForItem(item, orderCount) {
     label: itemLabel(item),
     quantity: orderCount * itemQuantity * Number(item?.pieces || 1)
   }];
+}
+
+function emptyUnitTotals() {
+  return Object.fromEntries(unitProductColumns.map((column) => [column.key, 0]));
+}
+
+function addItemUnitsToTotals(totals, item, setCount) {
+  prepMatrixQuantityForItem(item, setCount).forEach((entry) => {
+    const key = prepMatrixColumnByLabel.get(String(entry.label || '').trim().toLowerCase());
+    if (!key) return;
+    totals[key] += Number(entry.quantity || 0);
+  });
+}
+
+function addRowUnitsToTotals(totals, row) {
+  const setCount = Number(row?.order_count || 0);
+  const items = Array.isArray(row?.items) ? row.items : [];
+
+  if (items.length) {
+    items.forEach((item) => addItemUnitsToTotals(totals, item, setCount));
+    return;
+  }
+
+  if (Array.isArray(row?.source_batches)) {
+    (row.source_batches || []).forEach((source) => addRowUnitsToTotals(totals, source));
+  }
+}
+
+function unitTotalsForRows(rows = []) {
+  const totals = emptyUnitTotals();
+  rows.forEach((row) => addRowUnitsToTotals(totals, row));
+  return totals;
+}
+
+function totalUnits(totals) {
+  return Object.values(totals || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+}
+
+function renderUnitBreakdown(report = currentReport) {
+  if (!unitBreakdown) return;
+  if (!report || report.empty) {
+    unitBreakdown.innerHTML = '<p class="empty">Run an analysis first.</p>';
+    return;
+  }
+
+  const needTotals = unitTotalsForRows(visibleActionableBatches(report));
+  const processedTotals = unitTotalsForRows(batchState.completed || []);
+  const needTotal = totalUnits(needTotals);
+  const processedTotal = totalUnits(processedTotals);
+  unitBreakdown.innerHTML = `
+    <div class="unit-summary">
+      ${metric('Units Processed', processedTotal)}
+      ${metric('Units To Process', needTotal)}
+    </div>
+    <div class="data-table unit-table">
+      <div class="table-row table-head">
+        <span>Product</span><span>Processed Units</span><span>Units To Process</span>
+      </div>
+      ${unitProductColumns.map((column) => `
+        <div class="table-row">
+          <span>${escapeHtml(column.label)}</span>
+          <span>${processedTotals[column.key] || 0}</span>
+          <span>${needTotals[column.key] || 0}</span>
+        </div>
+      `).join('')}
+      <div class="table-row unit-total-row">
+        <span>Total</span>
+        <span>${processedTotal}</span>
+        <span>${needTotal}</span>
+      </div>
+    </div>
+  `;
 }
 
 function prepMatrixRows(rows) {
@@ -609,7 +686,8 @@ function quickCountSummary(orderCount, report = currentReport) {
         estimated_minutes: cluster.estimated_minutes,
         station: cluster.station,
         package: cluster.package,
-        carrier_label: cluster.carrier_label
+        carrier_label: cluster.carrier_label,
+        items: cluster.items || []
       }))
   };
 }
@@ -679,6 +757,8 @@ function renderSummary(report) {
   const skipped = report.summary.skipped || {};
   const issueSummary = report.summary.issues || {};
   const totals = getHistoryTotals();
+  const needUnitTotals = unitTotalsForRows(visibleActionableBatches(report));
+  const processedUnitTotals = unitTotalsForRows(batchState.completed || []);
   summaryGrid.innerHTML = [
     metric('Channel', report.channel_filter),
     metric('Source', report.data_source || 'live Veeqo'),
@@ -697,6 +777,8 @@ function renderSummary(report) {
     metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new / ${carrierLookup.cache_miss ?? 0} fallback`),
     metric('Open Orders', openOrders),
     metric('Fulfilled Here', completedOrderCount),
+    metric('Units To Process', totalUnits(needUnitTotals)),
+    metric('Units Processed', totalUnits(processedUnitTotals)),
     metric('All-Time Processed', totals.orders),
     metric('All-Time Work Time', minutes(totals.seconds / 60)),
     metric('Issue Orders', issueSummary.total_orders ?? 0),
@@ -714,6 +796,7 @@ function renderSummary(report) {
     metric('Generated', new Date(report.generated_at).toLocaleString())
   ].join('');
   renderTeamForecast();
+  renderUnitBreakdown(report);
   renderIssueView(report);
   renderHistoryView();
 }
@@ -774,6 +857,7 @@ function renderReport(report) {
       section.list.innerHTML = '<p class="empty">Run an analysis first.</p>';
     });
     renderQuickBatchActions(null);
+    renderUnitBreakdown(null);
     renderIssueView(null);
     renderHistoryView();
     return;
@@ -1028,6 +1112,7 @@ async function loadBatches() {
   if (currentReport) {
     renderSummary(currentReport);
     renderReportSections(currentReport);
+    renderUnitBreakdown(currentReport);
   }
   renderBatches();
   renderPrepView();

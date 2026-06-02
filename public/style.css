@@ -237,6 +237,30 @@ main {
   color: #633f00;
 }
 
+.unit-breakdown-panel {
+  border-top: 1px solid var(--line);
+  margin-bottom: 22px;
+  padding: 22px 0 0;
+}
+
+.unit-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  margin-bottom: 12px;
+  max-width: 620px;
+}
+
+.unit-table .table-row {
+  grid-template-columns: minmax(180px, 1fr) 160px 160px;
+  min-width: 520px;
+}
+
+.unit-total-row {
+  background: var(--soft);
+  font-weight: 900;
+}
+
 .quick-batch-panel {
   align-items: center;
   border: 1px solid var(--line);
