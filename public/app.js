@@ -42,6 +42,19 @@ const kitPiecesByPrintLabel = {
   'day-to-night kit': 5,
   'full runway kit': 7
 };
+const prepMatrixColumns = [
+  { key: 'access', header: 'ACCESS', labels: ['all access'] },
+  { key: 'stage', header: 'STAGE', labels: ['stage bright'] },
+  { key: 'spotlight', header: 'SPOTLIGHT', labels: ['spotlight'] },
+  { key: 'behind', header: 'BEHIND', labels: ['behind the scenes'] },
+  { key: 'finishing', header: 'FINISHING', labels: ['finishing touch'] },
+  { key: 'radiance', header: 'RADIANCE', labels: ['radiance ready'] },
+  { key: 'first_look', header: 'FIRST LOOK', labels: ['first look'] }
+];
+const prepMatrixColumnByLabel = prepMatrixColumns.reduce((lookup, column) => {
+  column.labels.forEach((label) => lookup.set(label, column.key));
+  return lookup;
+}, new Map());
 
 const sections = {
   batch: {
@@ -261,6 +274,39 @@ function kitStagingRowsForPrepRows(rows) {
       components: undefined
     }))
     .sort((a, b) => b.set_count - a.set_count || a.label.localeCompare(b.label));
+}
+
+function prepMatrixQuantityForItem(item, orderCount) {
+  const itemQuantity = Number(item?.quantity || 1);
+  const components = Array.isArray(item?.components) ? item.components : [];
+  if (components.length) {
+    return components.map((component) => ({
+      label: component.name || component.title || component.sku || 'Item',
+      quantity: orderCount * itemQuantity * Number(component.quantity || 1)
+    }));
+  }
+
+  return [{
+    label: itemLabel(item),
+    quantity: orderCount * itemQuantity * Number(item?.pieces || 1)
+  }];
+}
+
+function prepMatrixRows(rows) {
+  return rows.map((row) => {
+    const quantities = Object.fromEntries(prepMatrixColumns.map((column) => [column.key, 0]));
+    const orderCount = Number(row.order_count || 0);
+
+    (row.items || []).forEach((item) => {
+      prepMatrixQuantityForItem(item, orderCount).forEach((entry) => {
+        const key = prepMatrixColumnByLabel.get(String(entry.label || '').trim().toLowerCase());
+        if (!key) return;
+        quantities[key] += Number(entry.quantity || 0);
+      });
+    });
+
+    return { row, quantities };
+  });
 }
 
 function prepKitSummary(row) {
@@ -615,9 +661,13 @@ function renderCluster(cluster) {
 }
 
 function renderSection(name, clusters) {
+  const sortedClusters = [...clusters].sort((a, b) => (
+    Number(b.order_count || 0) - Number(a.order_count || 0)
+    || String(a.label || '').localeCompare(String(b.label || ''))
+  ));
   sections[name].count.textContent = clusters.length;
   sections[name].list.innerHTML = clusters.length
-    ? clusters.map(renderCluster).join('')
+    ? sortedClusters.map(renderCluster).join('')
     : '<p class="empty">None right now.</p>';
 }
 
@@ -1100,41 +1150,48 @@ function printPrepSheet() {
     showToast('Select at least one prep row to print.');
     return;
   }
-  const kitStagingRows = kitStagingRowsForPrepRows(selectedRows);
+  const matrixRows = prepMatrixRows(selectedRows);
   const content = `
     <!doctype html>
     <html>
       <head>
         <title>Prep Sheet</title>
         <style>
-          body { color: #1c2430; font-family: Arial, sans-serif; margin: 28px; }
-          h1 { font-size: 24px; margin: 0 0 6px; }
-          h2 { font-size: 18px; margin: 22px 0 8px; }
-          p { margin: 0 0 18px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border: 1px solid #d9dee7; font-size: 12px; padding: 8px; text-align: left; vertical-align: top; }
-          th { background: #f5f7fa; }
+          @page { margin: 0.25in; size: landscape; }
+          * { box-sizing: border-box; }
+          body { color: #1c2430; font-family: Arial, sans-serif; margin: 0; }
+          h1 { font-size: 18px; margin: 0 0 4px; }
+          p { font-size: 11px; margin: 0 0 10px; }
+          table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+          th, td { border: 1px solid #d9dee7; font-size: 10px; padding: 5px 6px; text-align: left; vertical-align: top; }
+          th { background: #f5f7fa; font-weight: 700; }
+          th:nth-child(1), td:nth-child(1) { width: 42px; }
+          th:nth-child(2), td:nth-child(2) { width: 88px; }
+          th:nth-child(3), td:nth-child(3) { width: 275px; }
+          th:nth-child(n+4), td:nth-child(n+4) { text-align: center; width: 70px; }
         </style>
       </head>
       <body>
         <h1>Prep / Assembly Sheet</h1>
         <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · ${selectedRows.length} prep rows · Prepare unsealed packages only.</p>
-        <h2>Kit / Item Staging</h2>
         <table>
           <thead>
-            <tr><th>Kit / Item</th><th>Sets to Stage</th><th>Items to Stage</th><th>Total Items</th></tr>
+            <tr>
+              <th>Orders</th>
+              <th>Package</th>
+              <th>Item / Kit</th>
+              ${prepMatrixColumns.map((column) => `<th>${escapeHtml(column.header)}</th>`).join('')}
+            </tr>
           </thead>
           <tbody>
-            ${kitStagingRows.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.set_count}</td><td>${item.component_totals.map((component) => `${escapeHtml(component.label)}: ${component.quantity}`).join('<br>')}</td><td>${item.total_items}</td></tr>`).join('')}
-          </tbody>
-        </table>
-        <h2>Selected Order Mixes</h2>
-        <table>
-          <thead>
-            <tr><th>Item / Kit</th><th>Orders</th><th>Package</th></tr>
-          </thead>
-          <tbody>
-            ${selectedRows.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td></tr>`).join('')}
+            ${matrixRows.map(({ row, quantities }) => `
+              <tr>
+                <td>${row.order_count}</td>
+                <td>${escapeHtml(row.package)}</td>
+                <td>${escapeHtml(row.label)}</td>
+                ${prepMatrixColumns.map((column) => `<td>${quantities[column.key] ? quantities[column.key] : ''}</td>`).join('')}
+              </tr>
+            `).join('')}
           </tbody>
         </table>
       </body>
