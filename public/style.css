@@ -286,8 +286,20 @@ main {
   font-weight: 700;
 }
 
+.quick-count-group {
+  border: 1px solid var(--navy);
+  display: grid;
+  gap: 8px;
+  min-width: 290px;
+  padding: 10px;
+}
+
+.quick-count-group > strong {
+  font-size: 14px;
+}
+
 .quick-count-active {
-  border: 2px solid var(--navy);
+  border: 1px solid var(--line);
   display: grid;
   gap: 8px;
   min-width: 250px;

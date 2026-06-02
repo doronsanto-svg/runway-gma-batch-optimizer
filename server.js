@@ -18,6 +18,7 @@ const publicDir = resolve(root, 'public');
 const port = Number.parseInt(process.env.PORT || '3000', 10);
 const sessions = new Map();
 const sessionTtlMs = 1000 * 60 * 60 * 12;
+const quickBatchChunkSize = 50;
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -189,6 +190,14 @@ function uniqueValues(values = []) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null && value !== ''))];
 }
 
+function chunkArray(values = [], size = quickBatchChunkSize) {
+  const chunks = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
   const orderIds = uniqueValues(Array.isArray(body.order_ids) ? body.order_ids : [])
     .filter((id) => !unavailableIds.has(id));
@@ -234,9 +243,7 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
   const targetCount = Number(orderCount || 0);
   if (![1, 2, 3].includes(targetCount)) return null;
 
-  const subBatchId = `COUNT-${targetCount}`;
-  const existing = store.active.find((batch) => batch.sub_batch_id === subBatchId);
-  if (existing) return { existing, subBatchId };
+  const baseSubBatchId = `COUNT-${targetCount}`;
 
   const unavailableIds = unavailableOrderIds(store);
   const source = sourceBatchesFromRequest(body, targetCount, unavailableIds)
@@ -247,40 +254,53 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
   const includedSources = sourceBatches.filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)));
 
   if (!includedSources.length || !orderIds.length) {
-    return { subBatchId, batch: null };
+    return { baseSubBatchId, batches: [] };
   }
 
   const carrierLabels = uniqueValues(includedSources.map((batch) => batch.carrier_label || 'Unknown'));
-  const label = `${targetCount}-Order Quick Batch`;
   const station = uniqueValues(includedSources.map((batch) => batch.station || '').filter(Boolean)).join(' / ') || 'Mixed';
   const packages = uniqueValues(includedSources.map((batch) => batch.package || '').filter(Boolean));
+  const orderNumberById = new Map();
+  orderIds.forEach((id, index) => {
+    orderNumberById.set(id, orderNumbers[index]);
+  });
+  const chunks = chunkArray(orderIds);
   return {
-    subBatchId,
-    batch: {
-      sub_batch_id: subBatchId,
-      signature: subBatchId,
-      carrier: 'mixed',
-      carrier_label: carrierLabels.length === 1 ? carrierLabels[0] : 'Mixed',
-      label,
-      category: 'quick_count',
-      station,
-      package: packages.length === 1 ? packages[0] : 'Mixed',
-      order_count: orderIds.length,
-      source_batch_count: includedSources.length,
-      source_order_count: targetCount,
-      total_revenue: includedSources.reduce((sum, batch) => sum + Number(batch.total_revenue || 0), 0),
-      estimated_minutes: includedSources.reduce((sum, batch) => sum + Number(batch.estimated_minutes || 0), 0),
-      order_ids: orderIds,
-      order_numbers: orderNumbers,
-      items: [],
-      source_batches: includedSources.map((batch) => ({
-        sub_batch_id: batch.sub_batch_id,
-        signature: batch.signature,
-        label: batch.label,
-        order_count: batch.order_count,
-        order_ids: batch.order_ids || []
-      }))
-    }
+    baseSubBatchId,
+    batches: chunks.map((chunk, index) => {
+      const chunkSet = new Set(chunk);
+      const chunkSources = includedSources.map((batch) => ({
+        ...batch,
+        order_ids: (batch.order_ids || []).filter((id) => chunkSet.has(id))
+      })).filter((batch) => (batch.order_ids || []).length);
+      const part = index + 1;
+      const subBatchId = `${baseSubBatchId}-${part}`;
+      return {
+        sub_batch_id: subBatchId,
+        signature: subBatchId,
+        carrier: 'mixed',
+        carrier_label: carrierLabels.length === 1 ? carrierLabels[0] : 'Mixed',
+        label: `${targetCount}-Order Quick Batch ${part}/${chunks.length}`,
+        category: 'quick_count',
+        station,
+        package: packages.length === 1 ? packages[0] : 'Mixed',
+        order_count: chunk.length,
+        source_batch_count: chunkSources.length,
+        source_order_count: targetCount,
+        total_revenue: chunkSources.reduce((sum, batch) => sum + Number(batch.total_revenue || 0), 0),
+        estimated_minutes: chunkSources.reduce((sum, batch) => sum + Number(batch.estimated_minutes || 0), 0),
+        order_ids: chunk,
+        order_numbers: chunk.map((id) => orderNumberById.get(id)).filter(Boolean),
+        items: [],
+        source_batches: chunkSources.map((batch) => ({
+          sub_batch_id: batch.sub_batch_id,
+          signature: batch.signature,
+          label: batch.label,
+          order_count: batch.order_count,
+          order_ids: batch.order_ids || []
+        }))
+      };
+    })
   };
 }
 
@@ -531,7 +551,7 @@ const server = createServer(async (request, response) => {
       const packageSuggestion = packageSuggestionForRow(subBatch, readPrepStore());
       const packageName = packageSuggestion.packageName || subBatch.package;
 
-      const live = report.data_source !== 'demo test data';
+      const live = report?.data_source !== 'demo test data';
       const tagName = live
         ? `BATCH-NOW-${tagSafe(subBatch.carrier)}-${Date.now()}`
         : `DEMO-BATCH-${tagSafe(subBatch.carrier)}-${Date.now()}`;
@@ -587,41 +607,44 @@ const server = createServer(async (request, response) => {
         sendJson(response, 400, { error: 'Order count must be 1, 2, or 3.' });
         return;
       }
-      if (quickBatch.existing) {
-        sendJson(response, 200, { batch: quickBatch.existing });
-        return;
-      }
-      if (!quickBatch.batch) {
+      if (!quickBatch.batches?.length) {
         sendJson(response, 404, { error: `No current ${body.order_count}-order batches are available to tag.` });
         return;
       }
 
-      const live = report.data_source !== 'demo test data';
-      const tagName = live
-        ? `BATCH-COUNT-${tagSafe(body.order_count)}-${Date.now()}`
-        : `DEMO-COUNT-${tagSafe(body.order_count)}-${Date.now()}`;
-      let tagId = null;
+      const live = report?.data_source !== 'demo test data';
+      const client = live ? makeVeeqoClient() : null;
+      const createdBatches = [];
+      const timestamp = Date.now();
 
-      if (live) {
-        const client = makeVeeqoClient();
-        const tag = await client.findOrCreateTag({ name: tagName, colour: '#f5df9e' });
-        tagId = tag.id;
-        await client.tagOrders({ orderIds: quickBatch.batch.order_ids, tagIds: [tag.id] });
+      for (let index = 0; index < quickBatch.batches.length; index += 1) {
+        const quickPart = quickBatch.batches[index];
+        const part = index + 1;
+        const tagName = live
+          ? `BATCH-COUNT-${tagSafe(body.order_count)}-${part}-${timestamp}`
+          : `DEMO-COUNT-${tagSafe(body.order_count)}-${part}-${timestamp}`;
+        let tagId = null;
+
+        if (live) {
+          const tag = await client.findOrCreateTag({ name: tagName, colour: '#f5df9e' });
+          tagId = tag.id;
+          await client.tagOrders({ orderIds: quickPart.order_ids, tagIds: [tag.id] });
+        }
+
+        createdBatches.push(createBatchRecord({
+          mode: live ? 'live' : 'demo',
+          status: 'active',
+          ...quickPart,
+          tag_name: tagName,
+          tag_id: tagId,
+          started_at: new Date().toISOString(),
+          pause_seconds: 0,
+          paused_at: null,
+          cleanup_status: live ? 'pending' : 'not_needed'
+        }));
       }
 
-      const batch = createBatchRecord({
-        mode: live ? 'live' : 'demo',
-        status: 'active',
-        ...quickBatch.batch,
-        tag_name: tagName,
-        tag_id: tagId,
-        started_at: new Date().toISOString(),
-        pause_seconds: 0,
-        paused_at: null,
-        cleanup_status: live ? 'pending' : 'not_needed'
-      });
-
-      sendJson(response, 200, { batch });
+      sendJson(response, 200, { batch: createdBatches[0], batches: createdBatches });
       return;
     }
 

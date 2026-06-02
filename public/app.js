@@ -570,8 +570,12 @@ function visibleActionableBatches(report = currentReport) {
   return actionable.filter((cluster) => !isClusterFullyCompleted(cluster));
 }
 
-function activeBatchForCount(orderCount) {
-  return (batchState.active || []).find((batch) => batch.sub_batch_id === `COUNT-${orderCount}`);
+function activeBatchesForCount(orderCount) {
+  const prefix = `COUNT-${orderCount}`;
+  return (batchState.active || []).filter((batch) => (
+    batch.sub_batch_id === prefix ||
+    String(batch.sub_batch_id || '').startsWith(`${prefix}-`)
+  ));
 }
 
 function quickCountSummary(orderCount, report = currentReport) {
@@ -618,20 +622,25 @@ function renderQuickBatchActions(report = currentReport) {
   }
 
   quickBatchActions.innerHTML = [1, 2, 3].map((orderCount) => {
-    const active = activeBatchForCount(orderCount);
+    const activeBatches = activeBatchesForCount(orderCount);
     const summary = quickCountSummary(orderCount, report);
-    if (active) {
+    if (activeBatches.length) {
       return `
-        <div class="quick-count-active">
-          <div>
-            <strong>${orderCount}-count active</strong>
-            <span>${Number(active.order_count || 0)} orders${active.tag_id ? ` · Veeqo ID ${escapeHtml(active.tag_id)}` : ''}</span>
-          </div>
-          <code>${escapeHtml(active.tag_name || 'No tag name')}</code>
-          <div class="quick-count-links">
-            <button class="copy-tag" type="button" data-tag-name="${escapeHtml(active.tag_name || '')}">Copy</button>
-            <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(active.tag_name, active.tag_id || ''))}" data-tag-name="${escapeHtml(active.tag_name || '')}" data-tag-id="${escapeHtml(active.tag_id || '')}">Open Veeqo</a>
-          </div>
+        <div class="quick-count-group">
+          <strong>${orderCount}-count active · ${activeBatches.length} tag${activeBatches.length === 1 ? '' : 's'}</strong>
+          ${activeBatches.map((active) => `
+            <div class="quick-count-active">
+              <div>
+                <strong>${escapeHtml(active.label || `${orderCount}-count batch`)}</strong>
+                <span>${Number(active.order_count || 0)} orders${active.tag_id ? ` · Veeqo ID ${escapeHtml(active.tag_id)}` : ''}</span>
+              </div>
+              <code>${escapeHtml(active.tag_name || 'No tag name')}</code>
+              <div class="quick-count-links">
+                <button class="copy-tag" type="button" data-tag-name="${escapeHtml(active.tag_name || '')}">Copy</button>
+                <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(active.tag_name, active.tag_id || ''))}" data-tag-name="${escapeHtml(active.tag_name || '')}" data-tag-id="${escapeHtml(active.tag_id || '')}">Open Veeqo</a>
+              </div>
+            </div>
+          `).join('')}
         </div>
       `;
     }
@@ -856,11 +865,13 @@ async function startCountBatch(orderCount, button) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Failed to start count batch');
     await loadBatches();
+    const createdBatches = Array.isArray(result.batches) && result.batches.length ? result.batches : [result.batch].filter(Boolean);
+    const firstTag = createdBatches[0]?.tag_name || result.batch?.tag_name;
     try {
-      await copyText(result.batch.tag_name);
-      showToast(`Count batch started and tag copied: ${result.batch.tag_name}`);
+      await copyText(firstTag);
+      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started. First tag copied: ${firstTag}`);
     } catch {
-      showToast(`Count batch started: ${result.batch.tag_name}`);
+      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started.`);
     }
   } catch (error) {
     showToast(error.message);
