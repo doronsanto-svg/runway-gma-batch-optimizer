@@ -9,6 +9,7 @@ import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches,
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
+import { analyzeOrderIssues } from './src/order-issues.js';
 
 loadEnv();
 
@@ -204,6 +205,14 @@ function veeqoUrlForBatch(batch) {
   return `${config.veeqoOrdersUrl}?tags[any_of]=${encodeURIComponent(batch.tag_id)}`;
 }
 
+function issueConfig() {
+  return {
+    veeqoOrdersUrl: process.env.VEEQO_ORDERS_URL || 'https://app.veeqo.com/orders',
+    veeqoOrderUrlTemplate: process.env.VEEQO_ORDER_URL_TEMPLATE || '',
+    shopifyOrderUrlTemplate: process.env.SHOPIFY_ORDER_URL_TEMPLATE || ''
+  };
+}
+
 function elapsedPauseSeconds(batch, now = new Date()) {
   const savedPauseSeconds = Number(batch.pause_seconds || 0);
   if (batch.status === 'paused' && batch.paused_at) {
@@ -333,6 +342,20 @@ const server = createServer(async (request, response) => {
         channels: [...counts.entries()]
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      });
+      return;
+    }
+
+    const issueRecheckMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/recheck$/);
+    if (request.method === 'POST' && issueRecheckMatch) {
+      const orderId = decodeURIComponent(issueRecheckMatch[1]);
+      const order = await makeVeeqoClient().getOrder(orderId);
+      const issue = analyzeOrderIssues(order, issueConfig());
+      sendJson(response, 200, {
+        order_id: order?.id || orderId,
+        order_number: order?.number || String(orderId),
+        status: issue?.hold ? 'held' : issue ? 'warning' : 'cleared',
+        issue
       });
       return;
     }

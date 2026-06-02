@@ -697,6 +697,54 @@ async function updateLabelCarrier(batchId, carrier) {
   showToast(carrier ? `Label carrier saved: ${carrier}` : 'Label carrier cleared.');
 }
 
+async function recheckIssueOrder(orderId, button) {
+  setButtonProcessing(button, true, 'Checking...');
+  try {
+    const response = await handleAuthResponse(await fetch(`/api/issues/${encodeURIComponent(orderId)}/recheck`, { method: 'POST' }));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Failed to recheck order');
+
+    if (currentReport) {
+      const nextIssues = result.issue
+        ? (currentReport.order_issues || []).map((issue) => issue.order_id === result.issue.order_id ? result.issue : issue)
+        : (currentReport.order_issues || []).filter((issue) => String(issue.order_id) !== String(orderId));
+      currentReport = {
+        ...currentReport,
+        order_issues: nextIssues,
+        summary: {
+          ...currentReport.summary,
+          issues: {
+            total_orders: nextIssues.length,
+            hold_orders: nextIssues.filter((issue) => issue.severity === 'hold').length,
+            warning_orders: nextIssues.filter((issue) => issue.severity !== 'hold').length,
+            by_type: nextIssues.reduce((counts, issue) => {
+              (issue.issue_types || []).forEach((type) => {
+                counts[type] = (counts[type] || 0) + 1;
+              });
+              return counts;
+            }, { phone: 0, address: 0, fraud: 0, shipping: 0 })
+          }
+        }
+      };
+      renderSummary(currentReport);
+      renderReportSections(currentReport);
+    }
+
+    if (result.status === 'cleared') {
+      showToast(`Cleared: ${result.order_number}. Run Live Re-analyze to return it to processing.`);
+    } else if (result.status === 'held') {
+      const details = result.issue?.issues?.map((issue) => issue.detail).filter(Boolean).join('; ');
+      showToast(`Still held: ${result.order_number}${details ? ` - ${details}` : ''}`);
+    } else {
+      showToast(`Warning remains: ${result.order_number}`);
+    }
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 async function loadBatches() {
   const response = await handleAuthResponse(await fetch('/api/batches'));
   batchState = await response.json();
@@ -1027,6 +1075,7 @@ function renderIssueView(report = currentReport) {
           <span class="link-row">
             <a target="_blank" rel="noopener" href="${escapeHtml(issue.veeqo_url)}">Veeqo</a>
             ${issue.shopify_url ? `<a target="_blank" rel="noopener" href="${escapeHtml(issue.shopify_url)}">Shopify</a>` : ''}
+            <button class="recheck-issue" type="button" data-order-id="${escapeHtml(issue.order_id)}">Recheck</button>
           </span>
         </div>
       `).join('')}
@@ -1201,6 +1250,9 @@ document.addEventListener('click', (event) => {
 
   const undoPrepButton = event.target.closest('.undo-prep');
   if (undoPrepButton) updatePrepStatus(undoPrepButton.dataset.signature, undoPrepButton.dataset.label, undoPrepButton.dataset.package, false, undoPrepButton);
+
+  const recheckIssueButton = event.target.closest('.recheck-issue');
+  if (recheckIssueButton) recheckIssueOrder(recheckIssueButton.dataset.orderId, recheckIssueButton);
 
   const copyButton = event.target.closest('.copy-tag');
   if (copyButton) {
