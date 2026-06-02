@@ -197,6 +197,22 @@ function activeBatchForSubBatch(subBatchId) {
   return (batchState.active || []).find((batch) => batch.sub_batch_id === subBatchId);
 }
 
+function completedOrderIdsInState() {
+  return new Set((batchState.completed || []).flatMap((batch) => batch.order_ids || []));
+}
+
+function isClusterFullyCompleted(cluster) {
+  const orderIds = cluster.order_ids || [];
+  if (!orderIds.length) return false;
+  const completedOrderIds = completedOrderIdsInState();
+  return orderIds.every((id) => completedOrderIds.has(id));
+}
+
+function visibleActionableBatches(report = currentReport) {
+  const actionable = report?.actionable_batches || report?.clusters || [];
+  return actionable.filter((cluster) => !isClusterFullyCompleted(cluster));
+}
+
 function getHistoryTotals() {
   const completed = batchState.completed || [];
   return {
@@ -296,7 +312,7 @@ function renderSection(name, clusters) {
 }
 
 function renderReportSections(report) {
-  const actionable = report.actionable_batches || report.clusters;
+  const actionable = visibleActionableBatches(report);
   renderSection('batch', actionable.filter((cluster) => cluster.bucket === 'batch'));
   renderSection('borderline', actionable.filter((cluster) => cluster.bucket === 'borderline'));
   renderSection('multipack', actionable.filter((cluster) => cluster.bucket === 'multipack'));
@@ -324,7 +340,7 @@ function renderReport(report) {
 }
 
 function renderChart(report) {
-  const actionable = report.actionable_batches || report.clusters;
+  const actionable = visibleActionableBatches(report);
   const groups = [
     { label: 'Batch', count: actionable.filter((cluster) => cluster.bucket === 'batch').reduce((sum, cluster) => sum + cluster.order_count, 0) },
     { label: 'Borderline', count: actionable.filter((cluster) => cluster.bucket === 'borderline').reduce((sum, cluster) => sum + cluster.order_count, 0) },
