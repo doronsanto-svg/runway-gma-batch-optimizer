@@ -896,10 +896,10 @@ function printPrepSheet() {
         <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · Prepare unsealed packages only.</p>
         <table>
           <thead>
-            <tr><th>Item / Kit</th><th>Orders</th><th>Package</th><th>Station</th><th>Estimate</th><th>Sample Orders</th></tr>
+            <tr><th>Item / Kit</th><th>Orders</th><th>Package</th></tr>
           </thead>
           <tbody>
-            ${opened.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td><td>${escapeHtml(row.station)}</td><td>${minutes(row.estimated_minutes || 0)}</td><td>${escapeHtml((row.sample_order_numbers || []).join(', '))}</td></tr>`).join('')}
+            ${opened.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td></tr>`).join('')}
           </tbody>
         </table>
       </body>
