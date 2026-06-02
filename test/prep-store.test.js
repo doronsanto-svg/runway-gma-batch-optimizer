@@ -69,6 +69,52 @@ test('packageSuggestionForRow learns from similar category and item count', () =
   assert.equal(suggestion.source, 'similar_memory');
 });
 
+test('packageSuggestionForRow uses calculated package before learned memory', () => {
+  const suggestion = packageSuggestionForRow({
+    signature: 'PL-RW-AA90-R:1|PL-RW-SB15-R:1',
+    category: 'combo',
+    package: '8x12 pouch if it fits',
+    items: [
+      { sku: 'PL-RW-AA90-R', name: 'All Access', quantity: 1 },
+      { sku: 'PL-RW-SB15-R', name: 'Stage Bright', quantity: 1 }
+    ]
+  }, {
+    package_overrides: {},
+    package_memory: {
+      signatures: {},
+      groups: {
+        'combo::2': { selected_package: '8x6x4 box' }
+      },
+      categories: {}
+    },
+    prepared: {}
+  });
+
+  assert.equal(suggestion.packageName, '6x10 pouch');
+  assert.equal(suggestion.source, 'calculated');
+});
+
+test('packageSuggestionForRow keeps explicit saved choice over calculated package', () => {
+  const suggestion = packageSuggestionForRow({
+    signature: 'PL-RW-AA90-R:1|PL-RW-SB15-R:1',
+    category: 'combo',
+    package: '8x12 pouch if it fits',
+    items: [
+      { sku: 'PL-RW-AA90-R', name: 'All Access', quantity: 1 },
+      { sku: 'PL-RW-SB15-R', name: 'Stage Bright', quantity: 1 }
+    ]
+  }, {
+    package_overrides: {
+      'PL-RW-AA90-R:1|PL-RW-SB15-R:1': { package: '8x12 pouch' }
+    },
+    package_memory: { signatures: {}, groups: {}, categories: {} },
+    prepared: {}
+  });
+
+  assert.equal(suggestion.packageName, '8x12 pouch');
+  assert.equal(suggestion.source, 'exact');
+});
+
 test('buildPrepRows marks prepared rows by signature and package', () => {
   const key = prepKey('SKU-C:1', '6x10 pouch');
   const rows = buildPrepRows(clusters, {

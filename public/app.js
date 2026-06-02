@@ -605,6 +605,7 @@ function packageControl(row, mode = 'prep') {
     signature_memory: 'Saved choice',
     similar_memory: 'Learned suggestion',
     category_memory: 'Category suggestion',
+    calculated: 'Calculated',
     default: 'Recommended'
   };
   const suggestionLabel = suggestionLabels[row.package_suggestion_source] || (row.package_overridden ? 'Saved choice' : 'Recommended');

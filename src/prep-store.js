@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { selectShipperForItems } from './packaging-calculator.js';
+import { readPackagingSettings } from './packaging-store.js';
 
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(process.cwd(), 'data');
 const storePath = resolve(dataDir, 'prep-state.json');
@@ -77,6 +79,9 @@ function packageSuggestionForCluster(cluster, store) {
   const exact = store.package_overrides?.[cluster.signature]?.package;
   if (exact) return { packageName: exact, source: 'exact' };
 
+  const calculated = selectShipperForItems(cluster.items || [], readPackagingSettings());
+  if (calculated.ok) return { packageName: calculated.package, source: 'calculated' };
+
   const signatureMemory = store.package_memory?.signatures?.[cluster.signature]?.selected_package;
   if (signatureMemory) return { packageName: signatureMemory, source: 'signature_memory' };
 
@@ -91,6 +96,11 @@ function packageSuggestionForCluster(cluster, store) {
 
 export function packageSuggestionForRow(row, store = readPrepStore()) {
   return packageSuggestionForCluster(row, store);
+}
+
+export function packageOptions() {
+  const settings = readPackagingSettings();
+  return Object.keys(settings.shippers || {}).length ? Object.keys(settings.shippers) : PACKAGE_OPTIONS;
 }
 
 export function prepItemLabels(row) {
@@ -192,7 +202,7 @@ export function buildPrepRows(clusters, store = readPrepStore()) {
       default_package: cluster.package,
       package_overridden: suggestion.source === 'exact',
       package_suggestion_source: suggestion.source,
-      package_options: PACKAGE_OPTIONS,
+      package_options: packageOptions(),
       station: cluster.station,
       order_count: cluster.order_count,
       estimated_minutes: cluster.estimated_minutes,

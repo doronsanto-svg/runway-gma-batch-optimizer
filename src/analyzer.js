@@ -12,7 +12,7 @@ import { buildReportPayload, writeReports } from './report.js';
 import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
-import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore } from './prep-store.js';
+import { buildPrepRows, packageOptions, packageSuggestionForRow, prepSummary, readPrepStore } from './prep-store.js';
 import { readBatchStore } from './batch-store.js';
 
 function parseBoolean(value, fallback = true) {
@@ -156,7 +156,7 @@ export function applyPackageOverrides(clusters, store) {
       default_package: row.package,
       package_overridden: suggestion.source === 'exact',
       package_suggestion_source: suggestion.source,
-      package_options: ['6x10 pouch', '8x12 pouch', '8x6x4 box']
+      package_options: packageOptions()
     });
 
     return applyOverride({
