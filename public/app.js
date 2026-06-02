@@ -956,11 +956,14 @@ async function startCountBatch(orderCount, button) {
     await loadBatches();
     const createdBatches = Array.isArray(result.batches) && result.batches.length ? result.batches : [result.batch].filter(Boolean);
     const firstTag = createdBatches[0]?.tag_name || result.batch?.tag_name;
+    const reviewNote = result.package_review_count
+      ? ` ${result.package_review_count} order${result.package_review_count === 1 ? '' : 's'} skipped for Package Review.`
+      : '';
     try {
       await copyText(firstTag);
-      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started. First tag copied: ${firstTag}`);
+      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started. First tag copied: ${firstTag}.${reviewNote}`);
     } catch {
-      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started.`);
+      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started.${reviewNote}`);
     }
   } catch (error) {
     showToast(error.message);

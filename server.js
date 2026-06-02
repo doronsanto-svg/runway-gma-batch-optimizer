@@ -210,26 +210,29 @@ function groupByPackageOrders(packageOrders = []) {
   return groups;
 }
 
-async function prepareBatchPackages({ client, live, packageOrders, settings = readPackagingSettings() }) {
+async function pushPreparedPackages({ client, live, preparedOrders }) {
+  if (!live) return;
+  for (const order of preparedOrders) {
+    await client.updateAllocationPackage({
+      allocationId: order.allocation_id,
+      allocationPackage: order.allocation_package
+    });
+  }
+}
+
+async function prepareBatchPackages({ client, live, packageOrders, settings = readPackagingSettings(), allowPartial = false }) {
   if (!Array.isArray(packageOrders) || !packageOrders.length) {
     throw new Error('Package Review required: run Live Re-analyze so orders include allocation/package details.');
   }
   const result = packageOrdersForBatch(packageOrders, settings);
-  if (result.failed.length) {
+  if (result.failed.length && (!allowPartial || !result.ok.length)) {
     const sample = result.failed.slice(0, 5).map((order) => `${order.order_number || order.order_id}: ${order.reason}`).join('; ');
     throw new Error(`Package Review required for ${result.failed.length} order(s). ${sample}`);
   }
 
-  if (live) {
-    for (const order of result.ok) {
-      await client.updateAllocationPackage({
-        allocationId: order.allocation_id,
-        allocationPackage: order.allocation_package
-      });
-    }
-  }
+  await pushPreparedPackages({ client, live, preparedOrders: result.ok });
 
-  return result.ok;
+  return allowPartial ? result : result.ok;
 }
 
 function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
@@ -682,12 +685,13 @@ const server = createServer(async (request, response) => {
       const live = report?.data_source !== 'demo test data';
       const client = live ? makeVeeqoClient() : null;
       const requestedPackageOrders = quickPackageOrders(report, body, store);
-      const preparedOrders = await prepareBatchPackages({
+      const packageResult = await prepareBatchPackages({
         client,
         live,
-        packageOrders: requestedPackageOrders
+        packageOrders: requestedPackageOrders,
+        allowPartial: true
       });
-      const quickBatch = buildCountBatchFromReport(report, body.order_count, store, body, preparedOrders);
+      const quickBatch = buildCountBatchFromReport(report, body.order_count, store, body, packageResult.ok);
       if (!quickBatch) {
         sendJson(response, 400, { error: 'Order count must be 1, 2, or 3.' });
         return;
@@ -727,7 +731,16 @@ const server = createServer(async (request, response) => {
         }));
       }
 
-      sendJson(response, 200, { batch: createdBatches[0], batches: createdBatches });
+      sendJson(response, 200, {
+        batch: createdBatches[0],
+        batches: createdBatches,
+        package_review_count: packageResult.failed.length,
+        package_review_orders: packageResult.failed.slice(0, 10).map((order) => ({
+          order_id: order.order_id,
+          order_number: order.order_number,
+          reason: order.reason
+        }))
+      });
       return;
     }
 

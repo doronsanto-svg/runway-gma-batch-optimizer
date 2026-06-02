@@ -49,3 +49,12 @@ test('selectShipperForItems returns review when dimensions are missing', () => {
   assert.equal(result.ok, false);
   assert.match(result.reason, /Missing dimensions/);
 });
+
+test('selectShipperForItems rotates packed dimensions across all axes', () => {
+  const result = selectShipperForItems([
+    { sku: 'PL-RW-FT72-R', name: 'Finishing Touch', quantity: 1 }
+  ], settings);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.package, '6x10 pouch');
+});

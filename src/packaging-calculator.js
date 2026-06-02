@@ -19,13 +19,24 @@ function hasDims(dims) {
   return dims.length > 0 && dims.width > 0 && dims.height > 0;
 }
 
+function dimensionOrientations(dims) {
+  const values = [dims.length, dims.width, dims.height];
+  return [
+    [values[0], values[1], values[2]],
+    [values[0], values[2], values[1]],
+    [values[1], values[0], values[2]],
+    [values[1], values[2], values[0]],
+    [values[2], values[0], values[1]],
+    [values[2], values[1], values[0]]
+  ].map(([length, width, height]) => ({ length, width, height }));
+}
+
 function fits(packageDims, shipperDims) {
-  const packageLength = packageDims.length;
-  const packageWidth = packageDims.width;
-  const packageHeight = packageDims.height;
-  const normal = packageLength <= shipperDims.length && packageWidth <= shipperDims.width;
-  const rotated = packageLength <= shipperDims.width && packageWidth <= shipperDims.length;
-  return (normal || rotated) && packageHeight <= shipperDims.height;
+  return dimensionOrientations(packageDims).some((orientation) => (
+    orientation.length <= shipperDims.length
+    && orientation.width <= shipperDims.width
+    && orientation.height <= shipperDims.height
+  ));
 }
 
 function shipperVolume(shipper) {
