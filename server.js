@@ -5,7 +5,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { loadEnv } from './src/env.js';
 import { readLatestReport } from './src/report.js';
 import { applyPackageStateToReport, runReadOnlyAnalysis } from './src/analyzer.js';
-import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord } from './src/batch-store.js';
+import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord, updateStoredBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
@@ -483,6 +483,24 @@ const server = createServer(async (request, response) => {
       });
 
       sendJson(response, 200, { batch: completed });
+      return;
+    }
+
+    const labelCarrierMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/label-carrier$/);
+    if (request.method === 'PATCH' && labelCarrierMatch) {
+      const batchId = decodeURIComponent(labelCarrierMatch[1]);
+      const body = await readJsonBody(request);
+      const carrier = String(body.carrier || '').toUpperCase();
+      if (carrier && !['USPS', 'UPS'].includes(carrier)) {
+        sendJson(response, 400, { error: 'Carrier must be USPS or UPS.' });
+        return;
+      }
+      const batch = updateStoredBatchRecord(batchId, { print_carrier: carrier });
+      if (!batch) {
+        sendJson(response, 404, { error: 'Batch not found.' });
+        return;
+      }
+      sendJson(response, 200, { batch });
       return;
     }
 

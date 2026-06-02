@@ -109,6 +109,23 @@ export function updateActiveBatchRecord(batchId, updates) {
   return store.active[index];
 }
 
+export function updateStoredBatchRecord(batchId, updates) {
+  const store = readBatchStore();
+  for (const bucket of ['active', 'completed', 'canceled']) {
+    const index = store[bucket].findIndex((batch) => batch.id === batchId);
+    if (index === -1) continue;
+
+    store[bucket][index] = {
+      ...store[bucket][index],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    writeBatchStore(store);
+    return store[bucket][index];
+  }
+  return null;
+}
+
 export function cancelBatchRecord(batchId, updates) {
   const store = readBatchStore();
   const index = store.active.findIndex((batch) => batch.id === batchId);

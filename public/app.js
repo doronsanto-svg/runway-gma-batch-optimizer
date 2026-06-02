@@ -194,6 +194,7 @@ function printBatchLabel(batchId) {
   const setCount = Number(batch.order_count || 0);
   const itemsPerSet = batchItemsPerSet(batch);
   const totalItems = setCount * itemsPerSet;
+  const selectedCarrier = batch.print_carrier || '';
   const content = `
     <!doctype html>
     <html>
@@ -240,6 +241,10 @@ function printBatchLabel(batchId) {
             padding: 0.12in 0.04in;
             text-align: center;
           }
+          .carrier-box.selected {
+            background: #111827;
+            color: #ffffff;
+          }
           .package {
             border: 3px solid #111827;
             font-size: 0.32in;
@@ -263,8 +268,8 @@ function printBatchLabel(batchId) {
           <div class="count">${setCount} sets</div>
           <div class="total">${itemsPerSet} items per set · ${totalItems} total items</div>
           <div class="carrier-check">
-            <div class="carrier-box">USPS</div>
-            <div class="carrier-box">UPS</div>
+            <div class="carrier-box${selectedCarrier === 'USPS' ? ' selected' : ''}">USPS</div>
+            <div class="carrier-box${selectedCarrier === 'UPS' ? ' selected' : ''}">UPS</div>
           </div>
           <div class="package">${escapeHtml(batch.package || 'Package')}</div>
           <div class="items">
@@ -342,6 +347,17 @@ function packageControl(row, mode = 'prep') {
       <input class="${mode}-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-category="${escapeHtml(row.category || '')}" data-items="${escapeHtml(JSON.stringify(row.items || []))}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
       <small>${escapeHtml(suggestionLabel)}</small>
     </div>
+  `;
+}
+
+function labelCarrierControl(batch) {
+  const selected = batch.print_carrier || '';
+  return `
+    <select class="label-carrier-select" data-batch-id="${escapeHtml(batch.id)}">
+      <option value=""${selected ? '' : ' selected'}>Circle on label</option>
+      <option value="USPS"${selected === 'USPS' ? ' selected' : ''}>USPS</option>
+      <option value="UPS"${selected === 'UPS' ? ' selected' : ''}>UPS</option>
+    </select>
   `;
 }
 
@@ -607,6 +623,25 @@ async function resumeBatch(batchId, button) {
   }
 }
 
+async function updateLabelCarrier(batchId, carrier) {
+  const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/label-carrier`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ carrier })
+  }));
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Failed to save carrier');
+
+  const updateBatch = (batch) => batch.id === batchId ? { ...batch, print_carrier: carrier } : batch;
+  batchState = {
+    ...batchState,
+    active: (batchState.active || []).map(updateBatch),
+    completed: (batchState.completed || []).map(updateBatch)
+  };
+  renderBatches();
+  showToast(carrier ? `Label carrier saved: ${carrier}` : 'Label carrier cleared.');
+}
+
 async function loadBatches() {
   const response = await handleAuthResponse(await fetch('/api/batches'));
   batchState = await response.json();
@@ -635,7 +670,7 @@ function renderBatches() {
           <p>Started ${new Date(batch.started_at).toLocaleTimeString()}</p>
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
-        <div class="cell"><span>Carrier</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong></div>
+        <div class="cell"><span>Carrier for label</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong>${labelCarrierControl(batch)}</div>
         <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
         <div class="cell"><span>Elapsed</span><strong>${minutes(activeElapsedSeconds(batch) / 60)}</strong></div>
         <div class="cell"><span>Status</span><strong>${paused ? 'Paused' : 'Running'}</strong></div>
@@ -664,7 +699,7 @@ function renderBatches() {
           <p>${escapeHtml(batch.cleanup_status)}</p>
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
-        <div class="cell"><span>Carrier</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong></div>
+        <div class="cell"><span>Carrier for label</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong>${labelCarrierControl(batch)}</div>
         <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
         <div class="cell"><span>Duration</span><strong>${minutes((batch.duration_seconds || 0) / 60)}</strong></div>
         <div class="cell"><span>Rate</span><strong>${Number(batch.orders_per_minute || 0).toFixed(1)}/min</strong></div>
@@ -1039,6 +1074,12 @@ document.addEventListener('click', (event) => {
 
 });
 document.addEventListener('change', (event) => {
+  const carrierSelect = event.target.closest('.label-carrier-select');
+  if (carrierSelect) {
+    updateLabelCarrier(carrierSelect.dataset.batchId, carrierSelect.value).catch((error) => showToast(error.message));
+    return;
+  }
+
   const select = event.target.closest('.prep-package-select, .batch-package-select');
   if (!select) return;
   const customInput = select.parentElement.querySelector('.prep-package-custom');
