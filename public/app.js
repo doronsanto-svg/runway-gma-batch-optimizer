@@ -216,6 +216,19 @@ function printBatchLabel(batchId) {
             line-height: 1.1;
             padding-bottom: 0.12in;
           }
+          .carrier-check {
+            display: grid;
+            gap: 0.12in;
+            grid-template-columns: 1fr 1fr;
+          }
+          .carrier-box {
+            border: 3px solid #111827;
+            font-size: 0.42in;
+            font-weight: 900;
+            line-height: 1;
+            padding: 0.12in 0.04in;
+            text-align: center;
+          }
           .items {
             display: grid;
             gap: 0.12in;
@@ -229,6 +242,10 @@ function printBatchLabel(batchId) {
         <section class="label">
           <div class="count">${setCount} sets</div>
           <div class="total">${itemsPerSet} items per set · ${totalItems} total items</div>
+          <div class="carrier-check">
+            <div class="carrier-box">USPS</div>
+            <div class="carrier-box">UPS</div>
+          </div>
           <div class="items">
             ${items.map((item) => `<div>${escapeHtml(item.label)}</div>`).join('')}
           </div>
