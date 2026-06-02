@@ -34,6 +34,13 @@ let portalConfig = {
   veeqo_tag_filter_url_template: ''
 };
 const collapseStorageKey = 'fillement_collapsed_sections';
+const kitPiecesByPrintLabel = {
+  'overnight recovery kit': 2,
+  'runway essentials kit': 3,
+  'glow protocol kit': 4,
+  'day-to-night kit': 5,
+  'full runway kit': 7
+};
 
 const sections = {
   batch: {
@@ -165,7 +172,11 @@ function batchItemsForPrint(batch) {
     .split(' + ')
     .map((item) => item.trim())
     .filter(Boolean)
-    .map((item) => ({ label: item, quantity: 1, pieces: 1 }));
+    .map((item) => ({
+      label: item,
+      quantity: 1,
+      pieces: kitPiecesByPrintLabel[item.toLowerCase()] || 1
+    }));
 }
 
 function batchItemsPerSet(batch) {
