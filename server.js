@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { loadEnv } from './src/env.js';
 import { readLatestReport } from './src/report.js';
-import { runReadOnlyAnalysis } from './src/analyzer.js';
+import { applyPackageStateToReport, runReadOnlyAnalysis } from './src/analyzer.js';
 import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, updateActiveBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
@@ -296,12 +296,12 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/latest-analysis') {
-      sendJson(response, 200, readLatestReport() || { empty: true });
+      sendJson(response, 200, applyPackageStateToReport(readLatestReport()) || { empty: true });
       return;
     }
 
     if (request.method === 'GET' && url.pathname === '/api/batches') {
-      const report = readLatestReport();
+      const report = applyPackageStateToReport(readLatestReport());
       sendJson(response, 200, report ? reconcileActiveBatches(report) : listBatches());
       return;
     }

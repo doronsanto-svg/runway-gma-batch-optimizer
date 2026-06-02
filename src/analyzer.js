@@ -146,7 +146,7 @@ export function completedOrderIdsForAnalysis(store = readBatchStore()) {
     .flatMap((batch) => batch.order_ids || []));
 }
 
-function applyPackageOverrides(clusters, store) {
+export function applyPackageOverrides(clusters, store) {
   return (clusters || []).map((cluster) => {
     const suggestion = packageSuggestionForRow(cluster, store);
     const packageName = suggestion.packageName;
@@ -164,6 +164,24 @@ function applyPackageOverrides(clusters, store) {
       sub_batches: (cluster.sub_batches || []).map(applyOverride)
     });
   });
+}
+
+export function applyPackageStateToReport(report, store = readPrepStore()) {
+  if (!report || report.empty) return report;
+  const clusters = applyPackageOverrides(report.clusters || [], store);
+  const actionableBatches = applyPackageOverrides(report.actionable_batches || report.clusters || [], store);
+  const prepRows = buildPrepRows(report.clusters || [], store);
+
+  return {
+    ...report,
+    clusters,
+    actionable_batches: actionableBatches,
+    prep_rows: prepRows,
+    summary: {
+      ...(report.summary || {}),
+      prep: prepSummary(prepRows)
+    }
+  };
 }
 
 export async function runReadOnlyAnalysis(options = {}) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { completedOrderIdsForAnalysis, orderHasPurchasedLabel, splitHeldOrders } from '../src/analyzer.js';
+import { applyPackageStateToReport, completedOrderIdsForAnalysis, orderHasPurchasedLabel, splitHeldOrders } from '../src/analyzer.js';
 
 test('splitHeldOrders excludes hold issue orders from batchable orders', () => {
   const orders = [{ id: 1 }, { id: 2 }, { id: 3 }];
@@ -31,4 +31,50 @@ test('completedOrderIdsForAnalysis excludes completed live orders but ignores de
   });
 
   assert.deepEqual([...orderIds], [1, 2, 4]);
+});
+
+test('applyPackageStateToReport reapplies saved package choices to latest report', () => {
+  const report = {
+    summary: {},
+    clusters: [{
+      signature: 'SKU-A:1',
+      label: 'Single A',
+      category: 'single_qty1',
+      package: '6x10 pouch',
+      station: 'A',
+      order_count: 1,
+      estimated_minutes: 1,
+      order_ids: [1],
+      order_numbers: ['#1'],
+      items: [{ sku: 'SKU-A', quantity: 1, pieces: 1 }],
+      sub_batches: []
+    }],
+    actionable_batches: [{
+      sub_batch_id: 'SKU-A:1::usps',
+      signature: 'SKU-A:1',
+      label: 'Single A · USPS',
+      category: 'single_qty1',
+      carrier: 'usps',
+      carrier_label: 'USPS',
+      package: '6x10 pouch',
+      station: 'A',
+      order_count: 1,
+      estimated_minutes: 1,
+      order_ids: [1],
+      order_numbers: ['#1'],
+      items: [{ sku: 'SKU-A', quantity: 1, pieces: 1 }]
+    }]
+  };
+
+  const hydrated = applyPackageStateToReport(report, {
+    package_overrides: {
+      'SKU-A:1': { package: '8x12 pouch' }
+    },
+    package_memory: { signatures: {}, groups: {}, categories: {} },
+    prepared: {}
+  });
+
+  assert.equal(hydrated.clusters[0].package, '8x12 pouch');
+  assert.equal(hydrated.actionable_batches[0].package, '8x12 pouch');
+  assert.equal(hydrated.prep_rows[0].package, '8x12 pouch');
 });
