@@ -240,6 +240,15 @@ function printBatchLabel(batchId) {
             padding: 0.12in 0.04in;
             text-align: center;
           }
+          .package {
+            border: 3px solid #111827;
+            font-size: 0.32in;
+            font-weight: 900;
+            line-height: 1.05;
+            padding: 0.1in;
+            text-align: center;
+            text-transform: uppercase;
+          }
           .items {
             display: grid;
             gap: 0.12in;
@@ -257,6 +266,7 @@ function printBatchLabel(batchId) {
             <div class="carrier-box">USPS</div>
             <div class="carrier-box">UPS</div>
           </div>
+          <div class="package">${escapeHtml(batch.package || 'Package')}</div>
           <div class="items">
             ${items.map((item) => `<div>${escapeHtml(item.label)}</div>`).join('')}
           </div>
@@ -311,17 +321,17 @@ function toggleCollapsedSection(section) {
   applyCollapsedSections();
 }
 
-function packageControl(row) {
+function packageControl(row, mode = 'prep') {
   const options = [...new Set([...(row.package_options || []), row.package].filter(Boolean))];
   const selectOptions = options.map((option) => `<option value="${escapeHtml(option)}"${option === row.package ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('');
   const customValue = row.package_options?.includes(row.package) ? '' : row.package;
   return `
     <div class="package-control">
-      <select class="prep-package-select" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}">
+      <select class="${mode}-package-select" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}">
         ${selectOptions}
         <option value="__custom__"${customValue ? ' selected' : ''}>Custom</option>
       </select>
-      <input class="prep-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
+      <input class="${mode}-package-custom" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" value="${escapeHtml(customValue)}" placeholder="Custom package"${customValue ? '' : ' hidden'}>
     </div>
   `;
 }
@@ -431,7 +441,7 @@ function renderCluster(cluster) {
       <div class="cell"><span>Issues</span><strong>${issueCount}</strong></div>
       <div class="cell"><span>Revenue</span><strong>${money(cluster.total_revenue)}</strong></div>
       <div class="cell"><span>Estimate</span><strong>${minutes(cluster.estimated_minutes)}</strong></div>
-      <div class="cell"><span>Station / Package</span><strong>${escapeHtml(cluster.station)} · ${escapeHtml(cluster.package)}</strong></div>
+      <div class="cell"><span>Station / Package</span><strong>${escapeHtml(cluster.station)}</strong>${packageControl(cluster, 'batch')}</div>
       ${action}
     </article>
   `;
@@ -717,6 +727,43 @@ async function updatePrepPackage(signature, label, packageName) {
   showToast('Prep package saved.');
 }
 
+function updateRowsPackage(rows, signature, packageName) {
+  return (rows || []).map((row) => {
+    if (row.signature !== signature) {
+      return {
+        ...row,
+        sub_batches: updateRowsPackage(row.sub_batches, signature, packageName)
+      };
+    }
+    return {
+      ...row,
+      package: packageName,
+      package_overridden: true,
+      sub_batches: updateRowsPackage(row.sub_batches, signature, packageName)
+    };
+  });
+}
+
+async function updateBatchPackage(signature, label, packageName) {
+  const response = await handleAuthResponse(await fetch('/api/prep/package', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature, label, package: packageName })
+  }));
+  prepState = await response.json();
+  if (currentReport) {
+    currentReport = {
+      ...currentReport,
+      clusters: updateRowsPackage(currentReport.clusters, signature, packageName),
+      actionable_batches: updateRowsPackage(currentReport.actionable_batches, signature, packageName),
+      prep_rows: updateRowsPackage(currentReport.prep_rows, signature, packageName)
+    };
+    renderReportSections(currentReport);
+    renderPrepView();
+  }
+  showToast('Batch package saved.');
+}
+
 async function updatePrepStatus(signature, label, packageName, prepared, button) {
   setButtonProcessing(button, true, prepared ? 'Saving...' : 'Undoing...');
   try {
@@ -974,23 +1021,28 @@ document.addEventListener('click', (event) => {
 
 });
 document.addEventListener('change', (event) => {
-  const select = event.target.closest('.prep-package-select');
+  const select = event.target.closest('.prep-package-select, .batch-package-select');
   if (!select) return;
   const customInput = select.parentElement.querySelector('.prep-package-custom');
+  const batchCustomInput = select.parentElement.querySelector('.batch-package-custom');
+  const input = customInput || batchCustomInput;
   if (select.value === '__custom__') {
-    customInput.hidden = false;
-    customInput.focus();
+    input.hidden = false;
+    input.focus();
     return;
   }
-  customInput.hidden = true;
-  customInput.value = '';
-  updatePrepPackage(select.dataset.signature, select.dataset.label, select.value);
+  input.hidden = true;
+  input.value = '';
+  if (select.classList.contains('batch-package-select')) updateBatchPackage(select.dataset.signature, select.dataset.label, select.value);
+  else updatePrepPackage(select.dataset.signature, select.dataset.label, select.value);
 });
 document.addEventListener('blur', (event) => {
-  const input = event.target.closest('.prep-package-custom');
+  const input = event.target.closest('.prep-package-custom, .batch-package-custom');
   if (!input || input.hidden) return;
   const value = input.value.trim();
-  if (value) updatePrepPackage(input.dataset.signature, input.dataset.label, value);
+  if (!value) return;
+  if (input.classList.contains('batch-package-custom')) updateBatchPackage(input.dataset.signature, input.dataset.label, value);
+  else updatePrepPackage(input.dataset.signature, input.dataset.label, value);
 }, true);
 window.setInterval(() => {
   if ((batchState.active || []).length) renderBatches();

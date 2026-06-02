@@ -146,6 +146,25 @@ export function completedOrderIdsForAnalysis(store = readBatchStore()) {
     .flatMap((batch) => batch.order_ids || []));
 }
 
+function applyPackageOverrides(clusters, store) {
+  return (clusters || []).map((cluster) => {
+    const override = store.package_overrides?.[cluster.signature];
+    const packageName = override?.package || cluster.package;
+    const applyOverride = (row) => ({
+      ...row,
+      package: packageName,
+      default_package: row.package,
+      package_overridden: Boolean(override?.package),
+      package_options: ['6x10 pouch', '8x12 pouch', '8x6x4 box']
+    });
+
+    return applyOverride({
+      ...cluster,
+      sub_batches: (cluster.sub_batches || []).map(applyOverride)
+    });
+  });
+}
+
 export async function runReadOnlyAnalysis(options = {}) {
   loadEnv();
 
@@ -214,8 +233,12 @@ export async function runReadOnlyAnalysis(options = {}) {
   const openBatchableOrders = batchableOrders.filter((order) => !completedOrderIds.has(order.id));
   const labelPurchasedOrders = openBatchableOrders.filter(orderHasPurchasedLabel);
   const labelNeededOrders = openBatchableOrders.filter((order) => !orderHasPurchasedLabel(order));
-  const { clusters, subBatches, summary } = analyzeOrders(labelNeededOrders, { threshold, requireGmaSkus });
-  const prepRows = buildPrepRows(clusters, readPrepStore());
+  const rawAnalysis = analyzeOrders(labelNeededOrders, { threshold, requireGmaSkus });
+  const prepStore = readPrepStore();
+  const clusters = applyPackageOverrides(rawAnalysis.clusters, prepStore);
+  const subBatches = clusters.flatMap((cluster) => cluster.sub_batches || []);
+  const summary = rawAnalysis.summary;
+  const prepRows = buildPrepRows(rawAnalysis.clusters, prepStore);
   summary.source_orders = channelOrders.length;
   summary.batchable_orders = batchableOrders.length;
   summary.local_completed_orders = locallyCompletedOrders.length;
