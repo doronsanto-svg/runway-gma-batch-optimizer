@@ -29,6 +29,7 @@ const toast = document.querySelector('#statusToast');
 let currentReport = null;
 let batchState = { active: [], completed: [] };
 let prepState = { rows: [], summary: {} };
+let selectedPrepKeys = new Set();
 let portalConfig = {
   veeqo_orders_url: 'https://app.veeqo.com/orders',
   veeqo_tag_filter_url_template: ''
@@ -147,6 +148,60 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function itemKey(item) {
+  return item?.sku || item?.name || item?.title || '';
+}
+
+function itemLabel(item) {
+  return item?.name || item?.title || item?.sku || 'Item';
+}
+
+function prepItemLabels(row) {
+  return (row?.items || [])
+    .slice()
+    .sort((a, b) => itemLabel(a).localeCompare(itemLabel(b)))
+    .map(itemLabel);
+}
+
+function prepOverlapScore(rowA, rowB) {
+  const keysA = new Set((rowA?.items || []).map(itemKey).filter(Boolean));
+  const keysB = new Set((rowB?.items || []).map(itemKey).filter(Boolean));
+  return [...keysA].filter((key) => keysB.has(key)).length;
+}
+
+function sortPrepRowsBySharedItems(rows) {
+  const openRows = rows.filter((row) => !row.prepared);
+  const preparedRows = rows.filter((row) => row.prepared);
+  const sorted = [];
+  const remaining = [...openRows].sort((a, b) => b.order_count - a.order_count || a.label.localeCompare(b.label));
+  while (remaining.length) {
+    const current = sorted.length
+      ? remaining
+        .map((row, index) => ({ row, index, score: prepOverlapScore(sorted[sorted.length - 1], row) }))
+        .sort((a, b) => b.score - a.score || b.row.order_count - a.row.order_count || a.row.label.localeCompare(b.row.label))[0]
+      : { row: remaining[0], index: 0 };
+    sorted.push(current.row);
+    remaining.splice(current.index, 1);
+  }
+  return [...sorted, ...preparedRows.sort((a, b) => b.order_count - a.order_count || a.label.localeCompare(b.label))];
+}
+
+function stagingTotalsForPrepRows(rows) {
+  const totals = new Map();
+  rows.forEach((row) => {
+    const orderCount = Number(row.order_count || 0);
+    (row.items || []).forEach((item) => {
+      const label = itemLabel(item);
+      const quantity = Number(item.quantity || 1);
+      const pieces = Number(item.pieces || 1);
+      totals.set(label, (totals.get(label) || 0) + (orderCount * quantity * pieces));
+    });
+  });
+  return [...totals.entries()]
+    .map(([label, quantity]) => ({ label, quantity }))
+    .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
 }
 
 function batchItemsForPrint(batch) {
@@ -730,7 +785,12 @@ function rowIsInActiveBatch(row) {
 
 function prepRows() {
   const rows = prepState.rows?.length ? prepState.rows : currentReport?.prep_rows || [];
-  return rows.filter((row) => !rowIsInActiveBatch(row));
+  return sortPrepRowsBySharedItems(rows.filter((row) => !rowIsInActiveBatch(row)));
+}
+
+function syncSelectedPrepKeys(rows) {
+  const visibleKeys = new Set(rows.map((row) => row.prep_key));
+  selectedPrepKeys = new Set([...selectedPrepKeys].filter((key) => visibleKeys.has(key)));
 }
 
 function prepRowsSummary(rows) {
@@ -749,6 +809,7 @@ function prepRowsSummary(rows) {
 function renderPrepView() {
   if (!prepSummaryGrid || !prepTable || !prepTableCount) return;
   const rows = prepRows();
+  syncSelectedPrepKeys(rows);
   const summary = prepRowsSummary(rows);
   prepSummaryGrid.innerHTML = [
     metric('Prep Rows', summary.rows ?? rows.length),
@@ -758,23 +819,30 @@ function renderPrepView() {
     metric('Prepared Orders', summary.prepared_orders ?? rows.filter((row) => row.prepared).reduce((sum, row) => sum + row.order_count, 0)),
     metric('Open Prep Time', minutes(summary.estimated_minutes || 0))
   ].join('');
+  printPrepButton.textContent = `Print Selected Prep (${selectedPrepKeys.size})`;
   prepTableCount.textContent = rows.length;
   prepTable.innerHTML = rows.length ? `
+    <div class="prep-toolbar">
+      <button id="selectVisiblePrepButton" type="button">Select All Visible</button>
+      <button id="clearPrepSelectionButton" type="button">Clear Selection</button>
+      <span>${selectedPrepKeys.size} selected</span>
+    </div>
     <div class="data-table prep-table">
       <div class="table-row table-head">
-        <span>Item / Kit</span><span>Orders</span><span>Package</span><span>Station</span><span>Estimate</span><span>Sample Orders</span><span>Status</span>
+        <span>Select</span><span>Item / Kit</span><span>Orders</span><span>Package</span><span>Item Flow</span><span>Status</span>
       </div>
       ${rows.map((row) => `
         <div class="table-row prep-row${row.prepared ? ' prepared' : ''}">
+          <span>
+            <input class="prep-row-select" type="checkbox" data-prep-key="${escapeHtml(row.prep_key)}"${selectedPrepKeys.has(row.prep_key) ? ' checked' : ''}${row.prepared ? ' disabled' : ''}>
+          </span>
           <span>
             <strong>${escapeHtml(row.label)}</strong>
             <small>${escapeHtml(row.signature)}</small>
           </span>
           <span>${row.order_count}</span>
           <span>${packageControl(row)}</span>
-          <span>${escapeHtml(row.station)}</span>
-          <span>${minutes(row.estimated_minutes || 0)}</span>
-          <span>${escapeHtml((row.sample_order_numbers || []).join(', '))}</span>
+          <span>${escapeHtml(prepItemLabels(row).join(' + ') || row.label)}</span>
           <span>
             <button class="${row.prepared ? 'undo-prep' : 'mark-prepared'}" type="button" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-package="${escapeHtml(row.package)}">${row.prepared ? 'Undo Prepared' : 'Mark Prepared'}</button>
           </span>
@@ -876,7 +944,12 @@ async function updatePrepStatus(signature, label, packageName, prepared, button)
 
 function printPrepSheet() {
   const rows = prepRows();
-  const opened = rows.filter((row) => !row.prepared);
+  const selectedRows = rows.filter((row) => selectedPrepKeys.has(row.prep_key) && !row.prepared);
+  if (!selectedRows.length) {
+    showToast('Select at least one prep row to print.');
+    return;
+  }
+  const stagingTotals = stagingTotalsForPrepRows(selectedRows);
   const content = `
     <!doctype html>
     <html>
@@ -885,6 +958,7 @@ function printPrepSheet() {
         <style>
           body { color: #1c2430; font-family: Arial, sans-serif; margin: 28px; }
           h1 { font-size: 24px; margin: 0 0 6px; }
+          h2 { font-size: 18px; margin: 22px 0 8px; }
           p { margin: 0 0 18px; }
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid #d9dee7; font-size: 12px; padding: 8px; text-align: left; vertical-align: top; }
@@ -893,13 +967,23 @@ function printPrepSheet() {
       </head>
       <body>
         <h1>Prep / Assembly Sheet</h1>
-        <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · Prepare unsealed packages only.</p>
+        <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · ${selectedRows.length} prep rows · Prepare unsealed packages only.</p>
+        <h2>Staging Totals</h2>
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Total Units Needed</th></tr>
+          </thead>
+          <tbody>
+            ${stagingTotals.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.quantity}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <h2>Prep Rows</h2>
         <table>
           <thead>
             <tr><th>Item / Kit</th><th>Orders</th><th>Package</th></tr>
           </thead>
           <tbody>
-            ${opened.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td></tr>`).join('')}
+            ${selectedRows.map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.order_count}</td><td>${escapeHtml(row.package)}</td></tr>`).join('')}
           </tbody>
         </table>
       </body>
@@ -1080,6 +1164,20 @@ document.addEventListener('click', (event) => {
     return;
   }
 
+  const selectVisiblePrepButton = event.target.closest('#selectVisiblePrepButton');
+  if (selectVisiblePrepButton) {
+    selectedPrepKeys = new Set(prepRows().filter((row) => !row.prepared).map((row) => row.prep_key));
+    renderPrepView();
+    return;
+  }
+
+  const clearPrepSelectionButton = event.target.closest('#clearPrepSelectionButton');
+  if (clearPrepSelectionButton) {
+    selectedPrepKeys.clear();
+    renderPrepView();
+    return;
+  }
+
   const startButton = event.target.closest('.start-batch');
   if (startButton) startBatch(startButton.dataset.subBatchId, startButton);
 
@@ -1113,6 +1211,14 @@ document.addEventListener('click', (event) => {
 
 });
 document.addEventListener('change', (event) => {
+  const prepRowSelect = event.target.closest('.prep-row-select');
+  if (prepRowSelect) {
+    if (prepRowSelect.checked) selectedPrepKeys.add(prepRowSelect.dataset.prepKey);
+    else selectedPrepKeys.delete(prepRowSelect.dataset.prepKey);
+    renderPrepView();
+    return;
+  }
+
   const carrierSelect = event.target.closest('.label-carrier-select');
   if (carrierSelect) {
     updateLabelCarrier(carrierSelect.dataset.batchId, carrierSelect.value).catch((error) => showToast(error.message));

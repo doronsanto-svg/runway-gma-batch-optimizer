@@ -434,8 +434,26 @@ main {
 }
 
 .prep-table .table-row {
-  grid-template-columns: minmax(220px, 1.5fr) 80px minmax(180px, 1fr) 100px 100px minmax(220px, 1.4fr) minmax(140px, 0.8fr);
+  grid-template-columns: 80px minmax(220px, 1.4fr) 80px minmax(180px, 1fr) minmax(240px, 1.4fr) minmax(140px, 0.8fr);
   min-width: 1120px;
+}
+
+.prep-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.prep-toolbar button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.prep-row-select {
+  height: 22px;
+  width: 22px;
 }
 
 .prep-row.prepared {

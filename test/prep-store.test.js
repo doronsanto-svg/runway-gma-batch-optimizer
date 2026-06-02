@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPrepRows, packageSuggestionForRow, prepKey, prepSummary } from '../src/prep-store.js';
+import { buildPrepRows, packageSuggestionForRow, prepKey, prepSummary, sortPrepRowsBySharedItems, stagingTotalsForPrepRows } from '../src/prep-store.js';
 
 const clusters = [
   {
@@ -98,4 +98,48 @@ test('prepSummary counts open and prepared work', () => {
     prepared_orders: 4,
     estimated_minutes: 15
   });
+});
+
+test('sortPrepRowsBySharedItems keeps overlapping item rows close together', () => {
+  const rows = sortPrepRowsBySharedItems([
+    {
+      label: 'Radiance Ready + Behind the Scenes + First Look',
+      order_count: 4,
+      items: [{ sku: 'RR' }, { sku: 'BTS' }, { sku: 'FL' }]
+    },
+    {
+      label: 'Stage Bright',
+      order_count: 12,
+      items: [{ sku: 'SB' }]
+    },
+    {
+      label: 'Finishing Touch + Behind the Scenes + First Look',
+      order_count: 5,
+      items: [{ sku: 'FT' }, { sku: 'BTS' }, { sku: 'FL' }]
+    }
+  ]);
+
+  assert.equal(rows[1].label, 'Finishing Touch + Behind the Scenes + First Look');
+  assert.equal(rows[2].label, 'Radiance Ready + Behind the Scenes + First Look');
+});
+
+test('stagingTotalsForPrepRows multiplies quantities, pieces, and order count', () => {
+  const totals = stagingTotalsForPrepRows([
+    {
+      order_count: 9,
+      items: [
+        { name: 'Behind the Scenes', quantity: 1, pieces: 1 },
+        { name: 'Overnight Recovery kit', quantity: 1, pieces: 2 }
+      ]
+    },
+    {
+      order_count: 3,
+      items: [{ name: 'Behind the Scenes', quantity: 2, pieces: 1 }]
+    }
+  ]);
+
+  assert.deepEqual(totals, [
+    { label: 'Overnight Recovery kit', quantity: 18 },
+    { label: 'Behind the Scenes', quantity: 15 }
+  ]);
 });

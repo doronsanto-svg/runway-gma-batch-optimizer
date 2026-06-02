@@ -30,6 +30,14 @@ function itemUnits(items = []) {
   return (items || []).reduce((sum, item) => sum + (Number(item.quantity || 1) * Number(item.pieces || 1)), 0);
 }
 
+function itemKey(item) {
+  return item?.sku || item?.name || item?.title || '';
+}
+
+function itemLabel(item) {
+  return item?.name || item?.title || item?.sku || 'Item';
+}
+
 function groupKey({ category, items = [] }) {
   return `${category || 'unknown'}::${itemUnits(items) || 0}`;
 }
@@ -83,6 +91,55 @@ function packageSuggestionForCluster(cluster, store) {
 
 export function packageSuggestionForRow(row, store = readPrepStore()) {
   return packageSuggestionForCluster(row, store);
+}
+
+export function prepItemLabels(row) {
+  return (row?.items || [])
+    .slice()
+    .sort((a, b) => itemLabel(a).localeCompare(itemLabel(b)))
+    .map(itemLabel);
+}
+
+export function prepOverlapScore(rowA, rowB) {
+  const keysA = new Set((rowA?.items || []).map(itemKey).filter(Boolean));
+  const keysB = new Set((rowB?.items || []).map(itemKey).filter(Boolean));
+  return [...keysA].filter((key) => keysB.has(key)).length;
+}
+
+export function sortPrepRowsBySharedItems(rows = []) {
+  const openRows = rows.filter((row) => !row.prepared);
+  const preparedRows = rows.filter((row) => row.prepared);
+  const sorted = [];
+  const remaining = [...openRows].sort((a, b) => b.order_count - a.order_count || a.label.localeCompare(b.label));
+
+  while (remaining.length) {
+    const current = sorted.length
+      ? remaining
+        .map((row, index) => ({ row, index, score: prepOverlapScore(sorted[sorted.length - 1], row) }))
+        .sort((a, b) => b.score - a.score || b.row.order_count - a.row.order_count || a.row.label.localeCompare(b.row.label))[0]
+      : { row: remaining[0], index: 0 };
+    sorted.push(current.row);
+    remaining.splice(current.index, 1);
+  }
+
+  return [...sorted, ...preparedRows.sort((a, b) => b.order_count - a.order_count || a.label.localeCompare(b.label))];
+}
+
+export function stagingTotalsForPrepRows(rows = []) {
+  const totals = new Map();
+  for (const row of rows) {
+    const orderCount = Number(row.order_count || 0);
+    for (const item of row.items || []) {
+      const label = itemLabel(item);
+      const quantity = Number(item.quantity || 1);
+      const pieces = Number(item.pieces || 1);
+      const total = orderCount * quantity * pieces;
+      totals.set(label, (totals.get(label) || 0) + total);
+    }
+  }
+  return [...totals.entries()]
+    .map(([label, quantity]) => ({ label, quantity }))
+    .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
 }
 
 export function setPackageOverride({ signature, label, packageName, category = '', items = [] }) {
@@ -147,7 +204,8 @@ export function buildPrepRows(clusters, store = readPrepStore()) {
       prepared_at: preparedRecord.prepared_at || null,
       prepared_updated_at: preparedRecord.updated_at || null
     };
-  }).sort((a, b) => Number(a.prepared) - Number(b.prepared) || b.order_count - a.order_count || a.label.localeCompare(b.label));
+  });
+  return sortPrepRowsBySharedItems(rows);
 }
 
 export function prepSummary(rows) {
