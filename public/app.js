@@ -579,14 +579,34 @@ function quickCountSummary(orderCount, report = currentReport) {
   const matchingRows = visibleActionableBatches(report)
     .filter((cluster) => Number(cluster.order_count || 0) === Number(orderCount || 0));
   const availableOrderIds = new Set();
+  const availableOrderNumbers = new Map();
   matchingRows.forEach((cluster) => {
     (cluster.order_ids || []).forEach((id) => {
-      if (!unavailableIds.has(id)) availableOrderIds.add(id);
+      if (unavailableIds.has(id)) return;
+      availableOrderIds.add(id);
+      const index = (cluster.order_ids || []).indexOf(id);
+      availableOrderNumbers.set(id, (cluster.order_numbers || [])[index]);
     });
   });
   return {
     rows: matchingRows.filter((cluster) => (cluster.order_ids || []).some((id) => availableOrderIds.has(id))).length,
-    orders: availableOrderIds.size
+    orders: availableOrderIds.size,
+    order_ids: [...availableOrderIds],
+    order_numbers: [...availableOrderIds].map((id) => availableOrderNumbers.get(id)).filter(Boolean),
+    source_batches: matchingRows
+      .filter((cluster) => (cluster.order_ids || []).some((id) => availableOrderIds.has(id)))
+      .map((cluster) => ({
+        sub_batch_id: cluster.sub_batch_id,
+        signature: cluster.signature,
+        label: cluster.label,
+        order_count: cluster.order_count,
+        order_ids: (cluster.order_ids || []).filter((id) => availableOrderIds.has(id)),
+        total_revenue: cluster.total_revenue,
+        estimated_minutes: cluster.estimated_minutes,
+        station: cluster.station,
+        package: cluster.package,
+        carrier_label: cluster.carrier_label
+      }))
   };
 }
 
@@ -816,12 +836,22 @@ async function startBatch(subBatchId, button) {
 }
 
 async function startCountBatch(orderCount, button) {
+  const summary = quickCountSummary(orderCount);
+  if (!summary.orders) {
+    showToast(`No available ${orderCount}-count orders to batch.`);
+    return;
+  }
   setButtonProcessing(button, true, 'Starting...');
   try {
     const response = await handleAuthResponse(await fetch('/api/batches/by-count', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_count: Number(orderCount) })
+      body: JSON.stringify({
+        order_count: Number(orderCount),
+        order_ids: summary.order_ids,
+        order_numbers: summary.order_numbers,
+        source_batches: summary.source_batches
+      })
     }));
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Failed to start count batch');

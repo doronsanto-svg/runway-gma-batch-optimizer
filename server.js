@@ -189,15 +189,30 @@ function uniqueValues(values = []) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null && value !== ''))];
 }
 
-function buildCountBatchFromReport(report, orderCount, store = readBatchStore()) {
-  const targetCount = Number(orderCount || 0);
-  if (![1, 2, 3].includes(targetCount)) return null;
+function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
+  const orderIds = uniqueValues(Array.isArray(body.order_ids) ? body.order_ids : [])
+    .filter((id) => !unavailableIds.has(id));
+  const sourceBatches = Array.isArray(body.source_batches) ? body.source_batches : [];
+  if (!orderIds.length || !sourceBatches.length) return null;
 
-  const subBatchId = `COUNT-${targetCount}`;
-  const existing = store.active.find((batch) => batch.sub_batch_id === subBatchId);
-  if (existing) return { existing, subBatchId };
+  const invalidSource = sourceBatches.some((batch) => Number(batch.order_count || 0) !== targetCount);
+  if (invalidSource) return null;
 
-  const unavailableIds = unavailableOrderIds(store);
+  const requestedOrderIds = new Set(orderIds);
+  const sourceOrderIds = new Set(sourceBatches.flatMap((batch) => batch.order_ids || []));
+  if (orderIds.some((id) => !sourceOrderIds.has(id))) return null;
+
+  return {
+    orderIds,
+    orderNumbers: uniqueValues(Array.isArray(body.order_numbers) ? body.order_numbers : []),
+    sourceBatches: sourceBatches.map((batch) => ({
+      ...batch,
+      order_ids: (batch.order_ids || []).filter((id) => requestedOrderIds.has(id))
+    })).filter((batch) => (batch.order_ids || []).length)
+  };
+}
+
+function sourceBatchesFromReport(report, targetCount, unavailableIds) {
   const sourceBatches = (report?.actionable_batches || report?.clusters || [])
     .filter((batch) => Number(batch.order_count || 0) === targetCount);
   const orderNumberById = new Map();
@@ -208,7 +223,27 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore())
   });
   const orderIds = uniqueValues(sourceBatches.flatMap((batch) => batch.order_ids || []))
     .filter((id) => !unavailableIds.has(id));
-  const orderNumbers = orderIds.map((id) => orderNumberById.get(id)).filter(Boolean);
+  return {
+    orderIds,
+    orderNumbers: orderIds.map((id) => orderNumberById.get(id)).filter(Boolean),
+    sourceBatches: sourceBatches.filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)))
+  };
+}
+
+function buildCountBatchFromReport(report, orderCount, store = readBatchStore(), body = {}) {
+  const targetCount = Number(orderCount || 0);
+  if (![1, 2, 3].includes(targetCount)) return null;
+
+  const subBatchId = `COUNT-${targetCount}`;
+  const existing = store.active.find((batch) => batch.sub_batch_id === subBatchId);
+  if (existing) return { existing, subBatchId };
+
+  const unavailableIds = unavailableOrderIds(store);
+  const source = sourceBatchesFromRequest(body, targetCount, unavailableIds)
+    || sourceBatchesFromReport(report, targetCount, unavailableIds);
+  const orderIds = source.orderIds;
+  const orderNumbers = source.orderNumbers;
+  const sourceBatches = source.sourceBatches;
   const includedSources = sourceBatches.filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)));
 
   if (!includedSources.length || !orderIds.length) {
@@ -547,7 +582,7 @@ const server = createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const report = readLatestReport();
       const store = readBatchStore();
-      const quickBatch = buildCountBatchFromReport(report, body.order_count, store);
+      const quickBatch = buildCountBatchFromReport(report, body.order_count, store, body);
       if (!quickBatch) {
         sendJson(response, 400, { error: 'Order count must be 1, 2, or 3.' });
         return;
@@ -756,6 +791,7 @@ const server = createServer(async (request, response) => {
     });
     response.end(data);
   } catch (error) {
+    console.error(`[${request.method}] ${request.url}`, error);
     if (error.code === 'ENOENT') {
       sendJson(response, 404, { error: 'Not found' });
       return;

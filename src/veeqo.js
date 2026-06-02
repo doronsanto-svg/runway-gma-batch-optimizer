@@ -244,19 +244,37 @@ export class VeeqoClient {
   }
 
   async tagOrders({ orderIds, tagIds }) {
-    const { body } = await this.request('/bulk_tagging', {}, {
-      method: 'POST',
-      body: { order_ids: orderIds, tag_ids: tagIds }
-    });
-    return body;
+    const chunks = [];
+    const ids = Array.isArray(orderIds) ? orderIds : [];
+    for (let index = 0; index < ids.length; index += 50) {
+      chunks.push(ids.slice(index, index + 50));
+    }
+    const results = [];
+    for (const chunk of chunks) {
+      const { body } = await this.request('/bulk_tagging', {}, {
+        method: 'POST',
+        body: { order_ids: chunk, tag_ids: tagIds }
+      });
+      results.push(body);
+    }
+    return results.length === 1 ? results[0] : results;
   }
 
   async untagOrders({ orderIds, tagIds }) {
-    const { body } = await this.request('/bulk_tagging', {}, {
-      method: 'DELETE',
-      body: { order_ids: orderIds, tag_ids: tagIds }
-    });
-    return body;
+    const chunks = [];
+    const ids = Array.isArray(orderIds) ? orderIds : [];
+    for (let index = 0; index < ids.length; index += 50) {
+      chunks.push(ids.slice(index, index + 50));
+    }
+    const results = [];
+    for (const chunk of chunks) {
+      const { body } = await this.request('/bulk_tagging', {}, {
+        method: 'DELETE',
+        body: { order_ids: chunk, tag_ids: tagIds }
+      });
+      results.push(body);
+    }
+    return results.length === 1 ? results[0] : results;
   }
 
   async getOrder(orderId) {
