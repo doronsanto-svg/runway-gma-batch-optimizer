@@ -13,6 +13,7 @@ import { buildDemoOrders } from './demo-orders.js';
 import { analyzeOrderIssues, summarizeOrderIssues } from './order-issues.js';
 import { readCarrierCache, writeCarrierCache } from './carrier-cache.js';
 import { buildPrepRows, prepSummary, readPrepStore } from './prep-store.js';
+import { readBatchStore } from './batch-store.js';
 
 function parseBoolean(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -139,6 +140,12 @@ export function orderHasPurchasedLabel(order) {
   );
 }
 
+export function completedOrderIdsForAnalysis(store = readBatchStore()) {
+  return new Set((store.completed || [])
+    .filter((batch) => batch.mode !== 'demo')
+    .flatMap((batch) => batch.order_ids || []));
+}
+
 export async function runReadOnlyAnalysis(options = {}) {
   loadEnv();
 
@@ -202,12 +209,17 @@ export async function runReadOnlyAnalysis(options = {}) {
     .filter(Boolean);
   const issueSummary = summarizeOrderIssues(orderIssues);
   const { heldOrderIds, batchableOrders } = splitHeldOrders(channelOrders, orderIssues);
-  const labelPurchasedOrders = batchableOrders.filter(orderHasPurchasedLabel);
-  const labelNeededOrders = batchableOrders.filter((order) => !orderHasPurchasedLabel(order));
+  const completedOrderIds = completedOrderIdsForAnalysis();
+  const locallyCompletedOrders = batchableOrders.filter((order) => completedOrderIds.has(order.id));
+  const openBatchableOrders = batchableOrders.filter((order) => !completedOrderIds.has(order.id));
+  const labelPurchasedOrders = openBatchableOrders.filter(orderHasPurchasedLabel);
+  const labelNeededOrders = openBatchableOrders.filter((order) => !orderHasPurchasedLabel(order));
   const { clusters, subBatches, summary } = analyzeOrders(labelNeededOrders, { threshold, requireGmaSkus });
   const prepRows = buildPrepRows(clusters, readPrepStore());
   summary.source_orders = channelOrders.length;
   summary.batchable_orders = batchableOrders.length;
+  summary.local_completed_orders = locallyCompletedOrders.length;
+  summary.open_batchable_orders = openBatchableOrders.length;
   summary.label_needed_orders = labelNeededOrders.length;
   summary.label_purchased_orders = labelPurchasedOrders.length;
   summary.held_orders = heldOrderIds.size;

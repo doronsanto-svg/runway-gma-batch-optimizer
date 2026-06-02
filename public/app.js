@@ -228,6 +228,8 @@ function renderSummary(report) {
     metric('In This Channel', report.summary.source_orders ?? 0),
     metric('Held Orders', report.summary.held_orders ?? 0),
     metric('Batchable Orders', report.summary.batchable_orders ?? report.summary.included_orders ?? 0),
+    metric('Completed Locally', report.summary.local_completed_orders ?? 0),
+    metric('Open Batchable', report.summary.open_batchable_orders ?? report.summary.label_needed_orders ?? report.summary.included_orders ?? 0),
     metric('Need Labels', report.summary.label_needed_orders ?? report.summary.included_orders ?? 0),
     metric('Labels Already Bought', report.summary.label_purchased_orders ?? 0),
     metric('Included Orders', report.summary.included_orders ?? 0),
