@@ -600,13 +600,27 @@ function renderQuickBatchActions(report = currentReport) {
   quickBatchActions.innerHTML = [1, 2, 3].map((orderCount) => {
     const active = activeBatchForCount(orderCount);
     const summary = quickCountSummary(orderCount, report);
-    const disabled = active || !summary.orders;
-    const detail = active
-      ? `Active tag: ${active.tag_name}`
-      : `${summary.rows} rows · ${summary.orders} orders`;
+    if (active) {
+      return `
+        <div class="quick-count-active">
+          <div>
+            <strong>${orderCount}-count active</strong>
+            <span>${Number(active.order_count || 0)} orders${active.tag_id ? ` · Veeqo ID ${escapeHtml(active.tag_id)}` : ''}</span>
+          </div>
+          <code>${escapeHtml(active.tag_name || 'No tag name')}</code>
+          <div class="quick-count-links">
+            <button class="copy-tag" type="button" data-tag-name="${escapeHtml(active.tag_name || '')}">Copy</button>
+            <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(active.tag_name, active.tag_id || ''))}" data-tag-name="${escapeHtml(active.tag_name || '')}" data-tag-id="${escapeHtml(active.tag_id || '')}">Open Veeqo</a>
+          </div>
+        </div>
+      `;
+    }
+
+    const disabled = !summary.orders;
+    const detail = `${summary.rows} rows · ${summary.orders} orders`;
     return `
       <button class="quick-count-batch" type="button" data-order-count="${orderCount}"${disabled ? ' disabled' : ''}>
-        <strong>${orderCount}-count batch</strong>
+        <strong>Generate ${orderCount}-count</strong>
         <span>${escapeHtml(detail)}</span>
       </button>
     `;

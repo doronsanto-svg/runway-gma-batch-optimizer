@@ -286,6 +286,49 @@ main {
   font-weight: 700;
 }
 
+.quick-count-active {
+  border: 2px solid var(--navy);
+  display: grid;
+  gap: 8px;
+  min-width: 250px;
+  padding: 10px 12px;
+}
+
+.quick-count-active strong {
+  display: block;
+  font-size: 14px;
+}
+
+.quick-count-active span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.quick-count-active code {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  padding: 7px 8px;
+}
+
+.quick-count-links {
+  display: flex;
+  gap: 8px;
+}
+
+.quick-count-links button,
+.quick-count-links a {
+  font-size: 13px;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .clusters {
   border-top: 1px solid var(--line);
   padding: 22px 0;
