@@ -650,6 +650,7 @@ async function loadBatches() {
     renderReportSections(currentReport);
   }
   renderBatches();
+  renderPrepView();
 }
 
 function renderBatches() {
@@ -712,14 +713,43 @@ function renderBatches() {
   renderHistoryView();
 }
 
+function activeBatchOrderIds() {
+  return new Set((batchState.active || []).flatMap((batch) => batch.order_ids || []));
+}
+
+function activeBatchSignatures() {
+  return new Set((batchState.active || []).map((batch) => batch.signature).filter(Boolean));
+}
+
+function rowIsInActiveBatch(row) {
+  const activeSignatures = activeBatchSignatures();
+  if (activeSignatures.has(row.signature)) return true;
+  const activeOrderIds = activeBatchOrderIds();
+  return (row.order_ids || []).some((id) => activeOrderIds.has(id));
+}
+
 function prepRows() {
-  return prepState.rows?.length ? prepState.rows : currentReport?.prep_rows || [];
+  const rows = prepState.rows?.length ? prepState.rows : currentReport?.prep_rows || [];
+  return rows.filter((row) => !rowIsInActiveBatch(row));
+}
+
+function prepRowsSummary(rows) {
+  const openRows = rows.filter((row) => !row.prepared);
+  const preparedRows = rows.filter((row) => row.prepared);
+  return {
+    rows: rows.length,
+    open_rows: openRows.length,
+    prepared_rows: preparedRows.length,
+    open_orders: openRows.reduce((sum, row) => sum + Number(row.order_count || 0), 0),
+    prepared_orders: preparedRows.reduce((sum, row) => sum + Number(row.order_count || 0), 0),
+    estimated_minutes: openRows.reduce((sum, row) => sum + Number(row.estimated_minutes || 0), 0)
+  };
 }
 
 function renderPrepView() {
   if (!prepSummaryGrid || !prepTable || !prepTableCount) return;
   const rows = prepRows();
-  const summary = prepState.summary || currentReport?.summary?.prep || {};
+  const summary = prepRowsSummary(rows);
   prepSummaryGrid.innerHTML = [
     metric('Prep Rows', summary.rows ?? rows.length),
     metric('Open Rows', summary.open_rows ?? rows.filter((row) => !row.prepared).length),
@@ -775,6 +805,15 @@ async function updatePrepPackage(signature, label, packageName, category = '', i
     body: JSON.stringify({ signature, label, package: packageName, category, items })
   }));
   prepState = await response.json();
+  if (currentReport) {
+    currentReport = {
+      ...currentReport,
+      clusters: updateRowsPackage(currentReport.clusters, signature, packageName),
+      actionable_batches: updateRowsPackage(currentReport.actionable_batches, signature, packageName),
+      prep_rows: updateRowsPackage(currentReport.prep_rows, signature, packageName)
+    };
+    renderReportSections(currentReport);
+  }
   renderPrepView();
   showToast('Prep package saved.');
 }
