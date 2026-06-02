@@ -6,7 +6,7 @@
     <title>Runway GMA Batch Optimizer</title>
     <link rel="icon" type="image/png" href="/odi-icon.png">
     <link rel="apple-touch-icon" href="/odi-icon.png">
-    <link rel="stylesheet" href="/style.css?v=20260602-1">
+    <link rel="stylesheet" href="/style.css?v=20260602-2">
   </head>
   <body>
     <header class="topbar">
@@ -208,7 +208,10 @@
             <div class="notice">Dimensions are inches. Weight is ounces. Product dimensions are retail box dimensions; shippers are the usable package dimensions.</div>
             <h3>Products</h3>
             <div id="productPackagingTable"></div>
-            <h3>Shippers</h3>
+            <div class="subsection-heading">
+              <h3>Shippers</h3>
+              <button id="addShipperButton" type="button">Add Shipper</button>
+            </div>
             <div id="shipperPackagingTable"></div>
           </div>
         </section>
@@ -216,6 +219,6 @@
     </main>
 
     <div id="statusToast" class="toast" hidden></div>
-    <script src="/app.js?v=20260602-1"></script>
+    <script src="/app.js?v=20260602-2"></script>
   </body>
 </html>

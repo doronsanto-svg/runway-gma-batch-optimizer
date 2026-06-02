@@ -277,6 +277,18 @@ main {
   margin-top: 3px;
 }
 
+.subsection-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+
+.subsection-heading h3 {
+  margin: 0;
+}
+
 .dimension-input {
   border: 1px solid var(--line);
   color: var(--ink);

@@ -1352,6 +1352,27 @@ async function savePackagingSettings(button) {
   }
 }
 
+function addPackagingShipper() {
+  const name = window.prompt('New shipper name, for example 14x10x4 box');
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return;
+  const shippers = packagingSettings.shippers || {};
+  if (shippers[trimmed]) {
+    showToast('That shipper already exists.');
+    return;
+  }
+  shippers[trimmed] = {
+    name: trimmed,
+    length: 0,
+    width: 0,
+    height: 0,
+    weight_oz: 0
+  };
+  packagingSettings.shippers = shippers;
+  renderPackagingSettings();
+  showToast('Shipper added. Enter dimensions and save.');
+}
+
 async function updatePrepPackage(signature, label, packageName, category = '', items = []) {
   const response = await handleAuthResponse(await fetch('/api/prep/package', {
     method: 'PATCH',
@@ -1708,6 +1729,9 @@ document.addEventListener('click', (event) => {
 
   const savePackaging = event.target.closest('#savePackagingButton');
   if (savePackaging) savePackagingSettings(savePackaging);
+
+  const addShipper = event.target.closest('#addShipperButton');
+  if (addShipper) addPackagingShipper();
 
   const copyButton = event.target.closest('.copy-tag');
   if (copyButton) {
