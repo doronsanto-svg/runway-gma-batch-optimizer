@@ -10,6 +10,8 @@ import { requireEnv } from './src/env.js';
 import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
 import { analyzeOrderIssues } from './src/order-issues.js';
+import { packageOrdersForBatch } from './src/packaging-calculator.js';
+import { readPackagingSettings, writePackagingSettings } from './src/packaging-store.js';
 
 loadEnv();
 
@@ -198,6 +200,38 @@ function chunkArray(values = [], size = quickBatchChunkSize) {
   return chunks;
 }
 
+function groupByPackageOrders(packageOrders = []) {
+  const groups = new Map();
+  for (const order of packageOrders) {
+    const key = order.package || 'Package Review';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(order);
+  }
+  return groups;
+}
+
+async function prepareBatchPackages({ client, live, packageOrders, settings = readPackagingSettings() }) {
+  if (!Array.isArray(packageOrders) || !packageOrders.length) {
+    throw new Error('Package Review required: run Live Re-analyze so orders include allocation/package details.');
+  }
+  const result = packageOrdersForBatch(packageOrders, settings);
+  if (result.failed.length) {
+    const sample = result.failed.slice(0, 5).map((order) => `${order.order_number || order.order_id}: ${order.reason}`).join('; ');
+    throw new Error(`Package Review required for ${result.failed.length} order(s). ${sample}`);
+  }
+
+  if (live) {
+    for (const order of result.ok) {
+      await client.updateAllocationPackage({
+        allocationId: order.allocation_id,
+        allocationPackage: order.allocation_package
+      });
+    }
+  }
+
+  return result.ok;
+}
+
 function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
   const orderIds = uniqueValues(Array.isArray(body.order_ids) ? body.order_ids : [])
     .filter((id) => !unavailableIds.has(id));
@@ -216,7 +250,8 @@ function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
     orderNumbers: uniqueValues(Array.isArray(body.order_numbers) ? body.order_numbers : []),
     sourceBatches: sourceBatches.map((batch) => ({
       ...batch,
-      order_ids: (batch.order_ids || []).filter((id) => requestedOrderIds.has(id))
+      order_ids: (batch.order_ids || []).filter((id) => requestedOrderIds.has(id)),
+      package_orders: (batch.package_orders || []).filter((order) => requestedOrderIds.has(order.order_id))
     })).filter((batch) => (batch.order_ids || []).length)
   };
 }
@@ -235,11 +270,16 @@ function sourceBatchesFromReport(report, targetCount, unavailableIds) {
   return {
     orderIds,
     orderNumbers: orderIds.map((id) => orderNumberById.get(id)).filter(Boolean),
-    sourceBatches: sourceBatches.filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)))
+    sourceBatches: sourceBatches
+      .filter((batch) => (batch.order_ids || []).some((id) => orderIds.includes(id)))
+      .map((batch) => ({
+        ...batch,
+        package_orders: (batch.package_orders || []).filter((order) => orderIds.includes(order.order_id))
+      }))
   };
 }
 
-function buildCountBatchFromReport(report, orderCount, store = readBatchStore(), body = {}) {
+function buildCountBatchFromReport(report, orderCount, store = readBatchStore(), body = {}, packageOrders = []) {
   const targetCount = Number(orderCount || 0);
   if (![1, 2, 3].includes(targetCount)) return null;
 
@@ -259,15 +299,20 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
 
   const carrierLabels = uniqueValues(includedSources.map((batch) => batch.carrier_label || 'Unknown'));
   const station = uniqueValues(includedSources.map((batch) => batch.station || '').filter(Boolean)).join(' / ') || 'Mixed';
-  const packages = uniqueValues(includedSources.map((batch) => batch.package || '').filter(Boolean));
   const orderNumberById = new Map();
   orderIds.forEach((id, index) => {
     orderNumberById.set(id, orderNumbers[index]);
   });
-  const chunks = chunkArray(orderIds);
+  const packageOrderById = new Map(packageOrders.map((order) => [order.order_id, order]));
+  const packageGroups = packageOrders.length
+    ? [...groupByPackageOrders(packageOrders).entries()]
+    : [['Mixed', orderIds.map((id) => ({ order_id: id }))]];
+  const chunks = packageGroups.flatMap(([packageName, orders]) => (
+    chunkArray(orders.map((order) => order.order_id), quickBatchChunkSize).map((chunk) => ({ packageName, chunk }))
+  ));
   return {
     baseSubBatchId,
-    batches: chunks.map((chunk, index) => {
+    batches: chunks.map(({ packageName, chunk }, index) => {
       const chunkSet = new Set(chunk);
       const chunkSources = includedSources.map((batch) => ({
         ...batch,
@@ -283,7 +328,7 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
         label: `${targetCount}-Order Quick Batch ${part}/${chunks.length}`,
         category: 'quick_count',
         station,
-        package: packages.length === 1 ? packages[0] : 'Mixed',
+        package: packageName,
         order_count: chunk.length,
         source_batch_count: chunkSources.length,
         source_order_count: targetCount,
@@ -292,17 +337,30 @@ function buildCountBatchFromReport(report, orderCount, store = readBatchStore(),
         order_ids: chunk,
         order_numbers: chunk.map((id) => orderNumberById.get(id)).filter(Boolean),
         items: [],
+        package_orders: chunk.map((id) => packageOrderById.get(id)).filter(Boolean),
         source_batches: chunkSources.map((batch) => ({
           sub_batch_id: batch.sub_batch_id,
           signature: batch.signature,
           label: batch.label,
           order_count: (batch.order_ids || []).length,
           order_ids: batch.order_ids || [],
-          items: batch.items || []
+          items: batch.items || [],
+          package_orders: (batch.package_orders || []).filter((order) => chunkSet.has(order.order_id))
         }))
       };
     })
   };
+}
+
+function quickPackageOrders(report, body, store = readBatchStore()) {
+  const targetCount = Number(body.order_count || 0);
+  const unavailableIds = unavailableOrderIds(store);
+  const source = sourceBatchesFromRequest(body, targetCount, unavailableIds)
+    || sourceBatchesFromReport(report, targetCount, unavailableIds);
+  const orderIdSet = new Set(source.orderIds || []);
+  return (source.sourceBatches || [])
+    .flatMap((batch) => batch.package_orders || [])
+    .filter((order) => orderIdSet.has(order.order_id));
 }
 
 function findStoredBatch(batchId) {
@@ -449,6 +507,17 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/packaging') {
+      sendJson(response, 200, readPackagingSettings());
+      return;
+    }
+
+    if (request.method === 'PATCH' && url.pathname === '/api/packaging') {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, writePackagingSettings(body));
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const status = process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment';
       const pageSize = Number.parseInt(process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
@@ -563,12 +632,18 @@ const server = createServer(async (request, response) => {
         return;
       }
 
+      const client = live ? makeVeeqoClient() : null;
+      const preparedOrders = await prepareBatchPackages({
+        client,
+        live,
+        packageOrders: subBatch.package_orders || []
+      });
       if (live) {
-        const client = makeVeeqoClient();
         const tag = await client.findOrCreateTag({ name: tagName, colour: '#f5df9e' });
         tagId = tag.id;
         await client.tagOrders({ orderIds: subBatch.order_ids, tagIds: [tag.id] });
       }
+      const packageNames = uniqueValues(preparedOrders.map((order) => order.package));
 
       const batch = createBatchRecord({
         mode: live ? 'live' : 'demo',
@@ -580,13 +655,14 @@ const server = createServer(async (request, response) => {
         label: subBatch.label,
         category: subBatch.category,
         station: subBatch.station,
-        package: packageName,
+        package: packageNames.length === 1 ? packageNames[0] : packageName,
         order_count: subBatch.order_count,
         total_revenue: subBatch.total_revenue,
         estimated_minutes: subBatch.estimated_minutes,
         order_ids: subBatch.order_ids,
         order_numbers: subBatch.order_numbers,
         items: subBatch.items || [],
+        package_orders: preparedOrders,
         tag_name: tagName,
         tag_id: tagId,
         started_at: new Date().toISOString(),
@@ -603,7 +679,15 @@ const server = createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const report = readLatestReport();
       const store = readBatchStore();
-      const quickBatch = buildCountBatchFromReport(report, body.order_count, store, body);
+      const live = report?.data_source !== 'demo test data';
+      const client = live ? makeVeeqoClient() : null;
+      const requestedPackageOrders = quickPackageOrders(report, body, store);
+      const preparedOrders = await prepareBatchPackages({
+        client,
+        live,
+        packageOrders: requestedPackageOrders
+      });
+      const quickBatch = buildCountBatchFromReport(report, body.order_count, store, body, preparedOrders);
       if (!quickBatch) {
         sendJson(response, 400, { error: 'Order count must be 1, 2, or 3.' });
         return;
@@ -613,8 +697,6 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const live = report?.data_source !== 'demo test data';
-      const client = live ? makeVeeqoClient() : null;
       const createdBatches = [];
       const timestamp = Date.now();
 

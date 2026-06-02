@@ -293,4 +293,12 @@ export class VeeqoClient {
     if (Array.isArray(body?.shipping_rates)) return body.shipping_rates;
     return [];
   }
+
+  async updateAllocationPackage({ allocationId, allocationPackage }) {
+    const { body } = await this.request(`/allocations/${allocationId}/allocation_package`, {}, {
+      method: 'PUT',
+      body: { allocation_package: allocationPackage }
+    });
+    return body;
+  }
 }

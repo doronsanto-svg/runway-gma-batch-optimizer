@@ -261,6 +261,32 @@ main {
   font-weight: 900;
 }
 
+.dimension-table {
+  margin: 12px 0 22px;
+}
+
+.dimension-table .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(100px, 0.6fr));
+  min-width: 760px;
+}
+
+.dimension-table small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.dimension-input {
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 5px 8px;
+  width: 100%;
+}
+
 .quick-batch-panel {
   align-items: center;
   border: 1px solid var(--line);

@@ -6,7 +6,7 @@
     <title>Runway GMA Batch Optimizer</title>
     <link rel="icon" type="image/png" href="/odi-icon.png">
     <link rel="apple-touch-icon" href="/odi-icon.png">
-    <link rel="stylesheet" href="/style.css?v=20260513-3">
+    <link rel="stylesheet" href="/style.css?v=20260602-1">
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +22,7 @@
         <button class="view-button" type="button" data-view="prepView">Prep</button>
         <button class="view-button" type="button" data-view="issuesView">Issues</button>
         <button class="view-button" type="button" data-view="historyView">History</button>
+        <button class="view-button" type="button" data-view="settingsView">Settings</button>
         <button id="demoButton" type="button">Demo Data</button>
         <button id="refreshButton" type="button">Live Re-analyze</button>
         <button id="carrierRefreshButton" type="button">Refresh Carriers</button>
@@ -191,9 +192,30 @@
           </div>
         </section>
       </section>
+
+      <section id="settingsView" class="view">
+        <section class="clusters collapsible-section" data-collapse-key="packagingSettings">
+          <div class="section-heading">
+            <button class="collapse-toggle" type="button" aria-expanded="true">
+              <span class="collapse-caret">▾</span>
+              <h2>Packaging Settings</h2>
+            </button>
+            <div class="heading-actions">
+              <button id="savePackagingButton" type="button">Save Packaging</button>
+            </div>
+          </div>
+          <div class="collapsible-content">
+            <div class="notice">Dimensions are inches. Weight is ounces. Product dimensions are retail box dimensions; shippers are the usable package dimensions.</div>
+            <h3>Products</h3>
+            <div id="productPackagingTable"></div>
+            <h3>Shippers</h3>
+            <div id="shipperPackagingTable"></div>
+          </div>
+        </section>
+      </section>
     </main>
 
     <div id="statusToast" class="toast" hidden></div>
-    <script src="/app.js?v=20260513-3"></script>
+    <script src="/app.js?v=20260602-1"></script>
   </body>
 </html>

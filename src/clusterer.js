@@ -1,5 +1,6 @@
 import { DEFAULT_BORDERLINE_MIN, DEFAULT_THRESHOLD, GMA_SKUS, SEED_PACK_RATES } from './constants.js';
 import { getLineItemSku, getLineItemTitle, getOrderCarrier, getOrderTotal } from './veeqo.js';
+import { orderPackageInput } from './packaging-calculator.js';
 
 export function normalizeOrderLineItems(order) {
   const quantitiesBySku = new Map();
@@ -133,6 +134,7 @@ export function analyzeOrders(orders, {
         estimated_minutes: 0,
         order_ids: [],
         order_numbers: [],
+        package_orders: [],
         items,
         sub_batches_by_carrier: new Map()
       });
@@ -145,6 +147,7 @@ export function analyzeOrders(orders, {
     cluster.total_revenue += revenue;
     cluster.order_ids.push(order.id);
     cluster.order_numbers.push(order.number);
+    cluster.package_orders.push(orderPackageInput(order, items));
 
     if (!cluster.sub_batches_by_carrier.has(carrierInfo.carrier)) {
       cluster.sub_batches_by_carrier.set(carrierInfo.carrier, {
@@ -164,6 +167,7 @@ export function analyzeOrders(orders, {
         estimated_minutes: 0,
         order_ids: [],
         order_numbers: [],
+        package_orders: [],
         items
       });
     }
@@ -173,6 +177,7 @@ export function analyzeOrders(orders, {
     subBatch.total_revenue += revenue;
     subBatch.order_ids.push(order.id);
     subBatch.order_numbers.push(order.number);
+    subBatch.package_orders.push(orderPackageInput(order, items));
   }
 
   const clusters = [...clustersBySignature.values()]

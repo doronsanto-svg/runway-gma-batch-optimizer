@@ -27,11 +27,15 @@ const historyTableCount = document.querySelector('#historyTableCount');
 const toast = document.querySelector('#statusToast');
 const quickBatchActions = document.querySelector('#quickBatchActions');
 const unitBreakdown = document.querySelector('#unitBreakdown');
+const productPackagingTable = document.querySelector('#productPackagingTable');
+const shipperPackagingTable = document.querySelector('#shipperPackagingTable');
+const savePackagingButton = document.querySelector('#savePackagingButton');
 
 let currentReport = null;
 let batchState = { active: [], completed: [] };
 let prepState = { rows: [], summary: {} };
 let selectedPrepKeys = new Set();
+let packagingSettings = { products: {}, shippers: {} };
 let portalConfig = {
   veeqo_orders_url: 'https://app.veeqo.com/orders',
   veeqo_tag_filter_url_template: ''
@@ -687,7 +691,8 @@ function quickCountSummary(orderCount, report = currentReport) {
         station: cluster.station,
         package: cluster.package,
         carrier_label: cluster.carrier_label,
-        items: cluster.items || []
+        items: cluster.items || [],
+        package_orders: (cluster.package_orders || []).filter((order) => availableOrderIds.has(order.order_id))
       }))
   };
 }
@@ -1277,6 +1282,76 @@ function parseDataItems(value) {
   }
 }
 
+function dimensionInput(kind, key, field, value) {
+  return `<input class="dimension-input" type="number" step="0.01" min="0" data-kind="${escapeHtml(kind)}" data-key="${escapeHtml(key)}" data-field="${escapeHtml(field)}" value="${escapeHtml(value ?? 0)}">`;
+}
+
+function renderPackagingSettings() {
+  if (!productPackagingTable || !shipperPackagingTable) return;
+  const products = Object.entries(packagingSettings.products || {})
+    .sort(([, a], [, b]) => String(a.name || '').localeCompare(String(b.name || '')));
+  const shippers = Object.entries(packagingSettings.shippers || {})
+    .sort(([, a], [, b]) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  productPackagingTable.innerHTML = `
+    <div class="data-table dimension-table">
+      <div class="table-row table-head">
+        <span>Product</span><span>Length</span><span>Width</span><span>Height</span><span>Weight oz</span>
+      </div>
+      ${products.map(([sku, product]) => `
+        <div class="table-row">
+          <span><strong>${escapeHtml(product.name || sku)}</strong><small>${escapeHtml(sku)}</small></span>
+          <span>${dimensionInput('products', sku, 'length', product.length)}</span>
+          <span>${dimensionInput('products', sku, 'width', product.width)}</span>
+          <span>${dimensionInput('products', sku, 'height', product.height)}</span>
+          <span>${dimensionInput('products', sku, 'weight_oz', product.weight_oz)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  shipperPackagingTable.innerHTML = `
+    <div class="data-table dimension-table">
+      <div class="table-row table-head">
+        <span>Shipper</span><span>Length</span><span>Width</span><span>Height</span><span>Weight oz</span>
+      </div>
+      ${shippers.map(([name, shipper]) => `
+        <div class="table-row">
+          <span><strong>${escapeHtml(shipper.name || name)}</strong></span>
+          <span>${dimensionInput('shippers', name, 'length', shipper.length)}</span>
+          <span>${dimensionInput('shippers', name, 'width', shipper.width)}</span>
+          <span>${dimensionInput('shippers', name, 'height', shipper.height)}</span>
+          <span>${dimensionInput('shippers', name, 'weight_oz', shipper.weight_oz)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function loadPackagingSettings() {
+  const response = await handleAuthResponse(await fetch('/api/packaging'));
+  packagingSettings = await response.json();
+  renderPackagingSettings();
+}
+
+async function savePackagingSettings(button) {
+  setButtonProcessing(button, true, 'Saving...');
+  try {
+    const response = await handleAuthResponse(await fetch('/api/packaging', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(packagingSettings)
+    }));
+    packagingSettings = await response.json();
+    renderPackagingSettings();
+    showToast('Packaging settings saved.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 async function updatePrepPackage(signature, label, packageName, category = '', items = []) {
   const response = await handleAuthResponse(await fetch('/api/prep/package', {
     method: 'PATCH',
@@ -1631,6 +1706,9 @@ document.addEventListener('click', (event) => {
   const recheckIssueButton = event.target.closest('.recheck-issue');
   if (recheckIssueButton) recheckIssueOrder(recheckIssueButton.dataset.orderId, recheckIssueButton);
 
+  const savePackaging = event.target.closest('#savePackagingButton');
+  if (savePackaging) savePackagingSettings(savePackaging);
+
   const copyButton = event.target.closest('.copy-tag');
   if (copyButton) {
     copyText(copyButton.dataset.tagName)
@@ -1640,6 +1718,16 @@ document.addEventListener('click', (event) => {
 
 });
 document.addEventListener('change', (event) => {
+  const dimension = event.target.closest('.dimension-input');
+  if (dimension) {
+    const bucket = packagingSettings[dimension.dataset.kind] || {};
+    const record = bucket[dimension.dataset.key] || {};
+    record[dimension.dataset.field] = Number.parseFloat(dimension.value || '0') || 0;
+    bucket[dimension.dataset.key] = record;
+    packagingSettings[dimension.dataset.kind] = bucket;
+    return;
+  }
+
   const prepRowSelect = event.target.closest('.prep-row-select');
   if (prepRowSelect) {
     if (prepRowSelect.checked) selectedPrepKeys.add(prepRowSelect.dataset.prepKey);
@@ -1684,5 +1772,6 @@ window.setInterval(() => {
 }, 30000);
 loadPortalConfig()
   .then(loadLatest)
+  .then(loadPackagingSettings)
   .then(applyCollapsedSections)
   .catch((error) => showToast(error.message));
