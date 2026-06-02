@@ -204,6 +204,51 @@ function stagingTotalsForPrepRows(rows) {
     .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
 }
 
+function kitStagingRowsForPrepRows(rows) {
+  const staged = new Map();
+  rows.forEach((row) => {
+    const orderCount = Number(row.order_count || 0);
+    (row.items || []).forEach((item) => {
+      const label = itemLabel(item);
+      const quantity = Number(item.quantity || 1);
+      const pieces = Number(item.pieces || 1);
+      const sets = orderCount * quantity;
+      const key = itemKey(item) || label;
+      const existing = staged.get(key) || {
+        key,
+        label,
+        set_count: 0,
+        pieces_per_set: pieces,
+        total_items: 0,
+        source_rows: 0,
+        component_label: pieces > 1 ? 'Kit items' : label
+      };
+      existing.set_count += sets;
+      existing.total_items += sets * pieces;
+      existing.source_rows += 1;
+      existing.pieces_per_set = Math.max(existing.pieces_per_set, pieces);
+      staged.set(key, existing);
+    });
+  });
+
+  return [...staged.values()]
+    .sort((a, b) => b.set_count - a.set_count || a.label.localeCompare(b.label));
+}
+
+function prepKitSummary(row) {
+  return (row.items || [])
+    .map((item) => {
+      const label = itemLabel(item);
+      const quantity = Number(item.quantity || 1);
+      const pieces = Number(item.pieces || 1);
+      const setLabel = quantity > 1 ? `${label} x ${quantity}` : label;
+      const totalItems = quantity * pieces;
+      const detail = totalItems > quantity ? `${quantity} set${quantity === 1 ? '' : 's'} / ${totalItems} items` : `${quantity} item${quantity === 1 ? '' : 's'}`;
+      return `${setLabel}: ${detail}`;
+    })
+    .join('; ');
+}
+
 function batchItemsForPrint(batch) {
   const items = Array.isArray(batch.items) ? batch.items : [];
   if (items.length) {
@@ -877,7 +922,7 @@ function renderPrepView() {
     </div>
     <div class="data-table prep-table">
       <div class="table-row table-head">
-        <span>Select</span><span>Item / Kit</span><span>Orders</span><span>Package</span><span>Item Flow</span><span>Status</span>
+        <span>Select</span><span>Order Mix</span><span>Orders</span><span>Package</span><span>Kit / Item Staging</span><span>Status</span>
       </div>
       ${rows.map((row) => `
         <div class="table-row prep-row${row.prepared ? ' prepared' : ''}">
@@ -890,7 +935,7 @@ function renderPrepView() {
           </span>
           <span>${row.order_count}</span>
           <span>${packageControl(row)}</span>
-          <span>${escapeHtml(prepItemLabels(row).join(' + ') || row.label)}</span>
+          <span>${escapeHtml(prepKitSummary(row) || prepItemLabels(row).join(' + ') || row.label)}</span>
           <span>
             <button class="${row.prepared ? 'undo-prep' : 'mark-prepared'}" type="button" data-signature="${escapeHtml(row.signature)}" data-label="${escapeHtml(row.label)}" data-package="${escapeHtml(row.package)}">${row.prepared ? 'Undo Prepared' : 'Mark Prepared'}</button>
           </span>
@@ -997,7 +1042,7 @@ function printPrepSheet() {
     showToast('Select at least one prep row to print.');
     return;
   }
-  const stagingTotals = stagingTotalsForPrepRows(selectedRows);
+  const kitStagingRows = kitStagingRowsForPrepRows(selectedRows);
   const content = `
     <!doctype html>
     <html>
@@ -1016,16 +1061,16 @@ function printPrepSheet() {
       <body>
         <h1>Prep / Assembly Sheet</h1>
         <p>${escapeHtml(currentReport?.channel_filter || '')} · ${new Date().toLocaleString()} · ${selectedRows.length} prep rows · Prepare unsealed packages only.</p>
-        <h2>Staging Totals</h2>
+        <h2>Kit / Item Staging</h2>
         <table>
           <thead>
-            <tr><th>Item</th><th>Total Units Needed</th></tr>
+            <tr><th>Kit / Item</th><th>Sets to Stage</th><th>Each Set Contains</th><th>Total Items</th></tr>
           </thead>
           <tbody>
-            ${stagingTotals.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.quantity}</td></tr>`).join('')}
+            ${kitStagingRows.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${item.set_count}</td><td>${item.pieces_per_set} ${escapeHtml(item.component_label)}</td><td>${item.total_items}</td></tr>`).join('')}
           </tbody>
         </table>
-        <h2>Prep Rows</h2>
+        <h2>Selected Order Mixes</h2>
         <table>
           <thead>
             <tr><th>Item / Kit</th><th>Orders</th><th>Package</th></tr>
