@@ -148,7 +148,12 @@ function batchItemsForPrint(batch) {
     return items.map((item) => {
       const name = item.name || item.title || item.sku || 'Item';
       const quantity = Number(item.quantity || 1);
-      return quantity > 1 ? `${name} x ${quantity}` : name;
+      const pieces = Number(item.pieces || 1);
+      return {
+        label: quantity > 1 ? `${name} x ${quantity}` : name,
+        quantity,
+        pieces
+      };
     });
   }
 
@@ -156,7 +161,15 @@ function batchItemsForPrint(batch) {
   const label = carrierSuffix && batch.label?.endsWith(carrierSuffix)
     ? batch.label.slice(0, -carrierSuffix.length)
     : batch.label || 'Batch';
-  return label.split(' + ').map((item) => item.trim()).filter(Boolean);
+  return label
+    .split(' + ')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => ({ label: item, quantity: 1, pieces: 1 }));
+}
+
+function batchItemsPerSet(batch) {
+  return batchItemsForPrint(batch).reduce((sum, item) => sum + (Number(item.quantity || 1) * Number(item.pieces || 1)), 0);
 }
 
 function printBatchLabel(batchId) {
@@ -167,6 +180,9 @@ function printBatchLabel(batchId) {
   }
 
   const items = batchItemsForPrint(batch);
+  const setCount = Number(batch.order_count || 0);
+  const itemsPerSet = batchItemsPerSet(batch);
+  const totalItems = setCount * itemsPerSet;
   const content = `
     <!doctype html>
     <html>
@@ -183,15 +199,22 @@ function printBatchLabel(batchId) {
           .label {
             align-content: start;
             display: grid;
-            gap: 0.18in;
+            gap: 0.14in;
             height: 6in;
             padding: 0.28in;
             width: 4in;
           }
           .count {
-            font-size: 0.9in;
+            font-size: 0.72in;
             font-weight: 900;
             line-height: 0.95;
+          }
+          .total {
+            border-bottom: 2px solid #111827;
+            font-size: 0.26in;
+            font-weight: 900;
+            line-height: 1.1;
+            padding-bottom: 0.12in;
           }
           .items {
             display: grid;
@@ -200,25 +223,14 @@ function printBatchLabel(batchId) {
             font-weight: 800;
             line-height: 1.08;
           }
-          .meta {
-            border-top: 1px solid #d1d5db;
-            color: #4b5563;
-            font-size: 0.15in;
-            font-weight: 700;
-            margin-top: 0.08in;
-            padding-top: 0.1in;
-          }
         </style>
       </head>
       <body>
         <section class="label">
-          <div class="count">${Number(batch.order_count || 0)})</div>
+          <div class="count">${setCount} sets</div>
+          <div class="total">${itemsPerSet} items per set · ${totalItems} total items</div>
           <div class="items">
-            ${items.map((item) => `<div>${escapeHtml(item)}</div>`).join('')}
-          </div>
-          <div class="meta">
-            ${escapeHtml(batch.carrier_label || 'Carrier')} · ${escapeHtml(batch.package || '')}<br>
-            ${escapeHtml(batch.tag_name || '')}
+            ${items.map((item) => `<div>${escapeHtml(item.label)}</div>`).join('')}
           </div>
         </section>
       </body>

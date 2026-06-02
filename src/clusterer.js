@@ -22,7 +22,9 @@ export function normalizeOrderLineItems(order) {
     .map(([sku, quantity]) => ({
       sku,
       quantity,
+      name: GMA_SKUS[sku]?.name || titlesBySku.get(sku) || sku,
       title: titlesBySku.get(sku) || null,
+      pieces: GMA_SKUS[sku]?.pieces || 1,
       gma: Boolean(GMA_SKUS[sku])
     }));
 }
