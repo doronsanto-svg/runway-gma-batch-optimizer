@@ -549,16 +549,17 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/sales-report') {
       const pageSize = Number.parseInt(process.env.VEEQO_SALES_PAGE_SIZE || process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
-      const maxPages = Number.parseInt(process.env.VEEQO_SALES_MAX_PAGES || '1000', 10);
-      const result = await makeVeeqoClient().listAllOrders({ status: '', pageSize, maxPages });
+      const maxPages = Number.parseInt(url.searchParams.get('pages') || process.env.VEEQO_SALES_MAX_PAGES || '5', 10);
+      const maxMs = Number.parseInt(process.env.VEEQO_SALES_MAX_MS || '20000', 10);
+      const result = await makeVeeqoClient().listAllOrders({ status: '', pageSize, maxPages, maxMs });
       sendJson(response, 200, buildSalesReport({
         orders: result.orders,
         channelFilter: url.searchParams.get('channel') || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
         completedOrderIds: completedOrderIds(),
-        dataSource: 'Veeqo order history',
+        dataSource: `Veeqo order history (${result.pagesPulled || 0} page${result.pagesPulled === 1 ? '' : 's'})`,
         totalCount: result.totalCount,
         totalPages: result.totalPages,
-        pagesPulled: result.totalPages ? Math.min(result.totalPages, maxPages) : null
+        pagesPulled: result.pagesPulled || 0
       }));
       return;
     }

@@ -205,22 +205,26 @@ export class VeeqoClient {
     };
   }
 
-  async listAllOrders({ status = 'awaiting_fulfillment', pageSize = 100, maxPages = 1000 } = {}) {
+  async listAllOrders({ status = 'awaiting_fulfillment', pageSize = 100, maxPages = 1000, maxMs = null } = {}) {
     const allOrders = [];
     let totalCount = 0;
     let totalPages = 0;
+    let pagesPulled = 0;
+    const startedAt = Date.now();
 
     for (let page = 1; page <= maxPages; page += 1) {
+      if (maxMs && Date.now() - startedAt >= maxMs) break;
       const result = await this.listOrdersPage({ status, page, pageSize });
       allOrders.push(...result.orders);
       totalCount = result.totalCount;
       totalPages = result.totalPages;
+      pagesPulled = page;
 
       if (result.orders.length === 0) break;
       if (totalPages && page >= totalPages) break;
     }
 
-    return { orders: allOrders, totalCount, totalPages };
+    return { orders: allOrders, totalCount, totalPages, pagesPulled };
   }
 
   async listTags() {

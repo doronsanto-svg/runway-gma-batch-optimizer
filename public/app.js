@@ -429,6 +429,7 @@ function renderSalesReport(report = salesReport) {
     metric('Kits Processed', summary.kits_processed ?? 0),
     metric('Kits Unprocessed', summary.kits_unprocessed ?? 0),
     metric('Veeqo Pages', report.veeqo_total_pages ? `${report.pages_pulled || report.veeqo_total_pages}/${report.veeqo_total_pages}` : 'Unknown'),
+    metric('History Window', `${report.pages_pulled || 0} page${Number(report.pages_pulled || 0) === 1 ? '' : 's'}`),
     metric('Skipped Non-GMA', summary.skipped_no_gma ?? 0),
     metric('No Items', summary.skipped_no_items ?? 0)
   ].join('');
@@ -1345,7 +1346,7 @@ async function loadPrep() {
 }
 
 async function loadSalesReport(button = salesRefreshButton) {
-  setButtonProcessing(button, true, 'Loading...');
+  setButtonProcessing(button, true, 'Loading recent...');
   try {
     const params = new URLSearchParams();
     if (channelInput.value.trim()) params.set('channel', channelInput.value.trim());
