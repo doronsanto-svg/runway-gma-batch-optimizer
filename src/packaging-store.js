@@ -4,6 +4,7 @@ import { GMA_SKUS } from './constants.js';
 
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(process.cwd(), 'data');
 const storePath = resolve(dataDir, 'packaging-settings.json');
+const deprecatedShipperNames = new Set(['6x10x2', '8x10x2']);
 
 const productDimensions = {
   'PL-RW-FL30-R': { length: 1.6875, width: 1.6875, height: 4.1875, weight_oz: 4.45 },
@@ -39,6 +40,14 @@ function mergeDimensionMap(defaults = {}, saved = {}) {
   ]));
 }
 
+function mergeShipperMap(defaults = {}, saved = {}) {
+  const keys = new Set([...Object.keys(defaults), ...Object.keys(saved)]);
+  return Object.fromEntries([...keys].filter((key) => !deprecatedShipperNames.has(key)).map((key) => {
+    if (defaults[key]) return [key, { ...(saved[key] || {}), ...defaults[key] }];
+    return [key, mergeDimensionRecord({ name: key }, saved[key] || {})];
+  }));
+}
+
 function defaultProducts() {
   return Object.fromEntries(Object.entries(GMA_SKUS)
     .filter(([, config]) => config.type === 'single')
@@ -51,14 +60,12 @@ function defaultProducts() {
 
 function defaultShippers() {
   return {
-    '6x10 pouch': { name: '6x10 pouch', length: 10, width: 6, height: 1, weight_oz: 0 },
-    '6x10x2': { name: '6x10x2', length: 10, width: 6, height: 2, weight_oz: 0 },
-    '8x10x2': { name: '8x10x2', length: 10, width: 8, height: 2, weight_oz: 0 },
-    '8x12 pouch': { name: '8x12 pouch', length: 12, width: 8, height: 1.5, weight_oz: 0 },
-    '8x6x4 box': { name: '8x6x4 box', length: 8, width: 6, height: 4, weight_oz: 0 },
-    '10x6x6 box': { name: '10x6x6 box', length: 10, width: 6, height: 6, weight_oz: 0 },
-    '12x6x6 box': { name: '12x6x6 box', length: 12, width: 6, height: 6, weight_oz: 0 },
-    '13x11x5 box': { name: '13x11x5 box', length: 13, width: 11, height: 5, weight_oz: 0 }
+    '6x10 pouch': { name: '6x10 pouch', length: 8, width: 6, height: 2, weight_oz: 0.5, kind: 'pouch' },
+    '8x12 pouch': { name: '8x12 pouch', length: 10, width: 8, height: 2, weight_oz: 0.5, kind: 'pouch' },
+    '8x6x4 box': { name: '8x6x4 box', length: 8, width: 6, height: 4, weight_oz: 1, kind: 'box' },
+    '10x6x6 box': { name: '10x6x6 box', length: 10, width: 6, height: 6, weight_oz: 1, kind: 'box' },
+    '12x6x6 box': { name: '12x6x6 box', length: 12, width: 6, height: 6, weight_oz: 1, kind: 'box' },
+    '13x11x5 box': { name: '13x11x5 box', length: 13, width: 11, height: 5, weight_oz: 2, kind: 'box' }
   };
 }
 
@@ -79,7 +86,7 @@ export function readPackagingSettings() {
     ...defaults,
     ...saved,
     products: mergeDimensionMap(defaults.products, saved.products || {}),
-    shippers: mergeDimensionMap(defaults.shippers, saved.shippers || {})
+    shippers: mergeShipperMap(defaults.shippers, saved.shippers || {})
   };
 }
 
@@ -91,7 +98,7 @@ export function writePackagingSettings(settings) {
     dimensions_unit: 'inches',
     weight_unit: 'oz',
     products: mergeDimensionMap(defaults.products, settings.products || {}),
-    shippers: mergeDimensionMap(defaults.shippers, settings.shippers || {})
+    shippers: mergeShipperMap(defaults.shippers, settings.shippers || {})
   };
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(storePath, JSON.stringify(next, null, 2));

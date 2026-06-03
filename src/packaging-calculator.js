@@ -1,19 +1,16 @@
 import { GMA_SKUS } from './constants.js';
 import { getPrimaryAllocationId } from './veeqo.js';
 
-const skuPackageGuide = {
-  'PL-RW-FL30-R': '6x10 pouch',
-  'PL-RW-BTS100-R': '8x10x2',
-  'PL-RW-SL30-R': '6x10x2',
-  'PL-RW-SB15-R': '6x10x2',
-  'PL-RW-RR50-R': '6x10x2',
-  'PL-RW-AA90-R': '6x10x2',
-  'PL-RW-FT72-R': '6x10x2',
-  'PL-RW-TRE3-R': '8x6x4 box',
-  'PL-RW-TOR2-R': '8x10x2',
-  'PL-RW-TGP4-R': '8x6x4 box',
-  'PL-RW-TDTNR5-R': '8x6x4 box',
-  'PL-RW-TFR7-R': '8x6x4 box'
+const defaultConfig = {
+  dim_divisor: 139,
+  dim_weight_volume_threshold: 1728,
+  max_package_weight_oz: null,
+  max_realistic_fill: 0.92,
+  w_billable_oz: 10,
+  w_void_volume: 0.01,
+  backtrack_node_cap: 20000,
+  pouch_height_flex: 0.5,
+  max_items_per_pouch: 2
 };
 
 function number(value) {
@@ -35,19 +32,26 @@ function hasDims(dims) {
 }
 
 function isFlexibleShipper(shipper = {}) {
-  return /pouch|poly|mailer|envelope/i.test(String(shipper.name || ''));
+  return shipper.kind === 'pouch' || /pouch|poly|mailer|envelope/i.test(String(shipper.name || ''));
 }
 
 function dimensionOrientations(dims) {
-  const values = [dims.length, dims.width, dims.height];
-  return [
+  const values = Array.isArray(dims) ? dims : [dims.length, dims.width, dims.height];
+  const candidates = [
     [values[0], values[1], values[2]],
     [values[0], values[2], values[1]],
     [values[1], values[0], values[2]],
     [values[1], values[2], values[0]],
     [values[2], values[0], values[1]],
     [values[2], values[1], values[0]]
-  ].map(([length, width, height]) => ({ length, width, height }));
+  ];
+  const seen = new Set();
+  return candidates.filter((orientation) => {
+    const key = orientation.join('x');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(([length, width, height]) => ({ length, width, height }));
 }
 
 function fits(packageDims, shipperDims) {
@@ -58,61 +62,121 @@ function fits(packageDims, shipperDims) {
   ));
 }
 
-function fitsFlexible(units = [], shipperDims) {
-  const longestSide = Math.max(...units.map((unit) => unit.length));
-  const widestFace = Math.max(...units.map((unit) => unit.width));
-  const totalThickness = units.reduce((sum, unit) => sum + unit.height, 0);
-  const requiredWidth = widestFace + totalThickness;
-  const normal = longestSide <= shipperDims.length && requiredWidth <= shipperDims.width;
-  const rotated = longestSide <= shipperDims.width && requiredWidth <= shipperDims.length;
-  return normal || rotated;
-}
-
 function shipperVolume(shipper) {
   const dims = normalizeDims(shipper);
   return dims.length * dims.width * dims.height;
 }
 
-function itemPhysicalUnits(item) {
-  const skuPieces = GMA_SKUS[item.sku]?.pieces || 1;
-  return Number(item.quantity || 1) * skuPieces;
+function itemVolume(item) {
+  return item.length * item.width * item.height;
 }
 
-function totalPhysicalUnits(items = []) {
-  return (items || []).reduce((sum, item) => sum + itemPhysicalUnits(item), 0);
+function overlap(placed, candidate) {
+  const eps = 1e-9;
+  return (
+    placed.x < candidate.x + candidate.l - eps &&
+    candidate.x < placed.x + placed.l - eps &&
+    placed.y < candidate.y + candidate.w - eps &&
+    candidate.y < placed.y + placed.w - eps &&
+    placed.z < candidate.z + candidate.h - eps &&
+    candidate.z < placed.z + placed.h - eps
+  );
 }
 
-function packageGuideForItems(items = []) {
-  const normalizedItems = items || [];
-  if (normalizedItems.length === 1 && Number(normalizedItems[0].quantity || 1) === 1) {
-    const directPackage = skuPackageGuide[normalizedItems[0].sku];
-    if (directPackage) return directPackage;
+function packItems(container, items, config = defaultConfig, { singleLayer = false } = {}) {
+  const ordered = [...items].sort((a, b) => (
+    Math.max(b.length, b.width, b.height) - Math.max(a.length, a.width, a.height) ||
+    itemVolume(b) - itemVolume(a) ||
+    String(a.sku).localeCompare(String(b.sku))
+  ));
+  let nodes = 0;
+
+  function place(index, placed, points) {
+    if (index === ordered.length) return placed;
+    nodes += 1;
+    if (nodes > config.backtrack_node_cap) return null;
+
+    const item = ordered[index];
+    const uniquePoints = [...new Map(points.map((point) => [`${point.x}|${point.y}|${point.z}`, point])).values()]
+      .sort((a, b) => a.z - b.z || a.y - b.y || a.x - b.x);
+
+    for (const point of uniquePoints) {
+      for (const orientation of dimensionOrientations(item)) {
+        const candidate = {
+          sku: item.sku,
+          name: item.name,
+          x: point.x,
+          y: point.y,
+          z: point.z,
+          l: orientation.length,
+          w: orientation.width,
+          h: orientation.height
+        };
+        if (
+          candidate.x + candidate.l > container.length + 1e-9 ||
+          candidate.y + candidate.w > container.width + 1e-9 ||
+          candidate.z + candidate.h > container.height + 1e-9
+        ) {
+          continue;
+        }
+        if (placed.some((existing) => overlap(existing, candidate))) continue;
+
+        const nextPoints = points.filter((next) => !(next.x === point.x && next.y === point.y && next.z === point.z));
+        nextPoints.push(
+          { x: point.x + candidate.l, y: point.y, z: point.z },
+          { x: point.x, y: point.y + candidate.w, z: point.z }
+        );
+        if (!singleLayer) nextPoints.push({ x: point.x, y: point.y, z: point.z + candidate.h });
+
+        const result = place(index + 1, [...placed, candidate], nextPoints);
+        if (result) return result;
+      }
+    }
+
+    return null;
   }
 
-  const units = totalPhysicalUnits(normalizedItems);
-  if (units === 1) return skuPackageGuide[normalizedItems[0]?.sku] || '6x10x2';
-  if (units === 2) return '8x10x2';
-  if (units >= 3 && units <= 8) return '8x6x4 box';
-  if (units >= 9 && units <= 12) return '10x6x6 box';
-  if (units >= 13 && units <= 15) return '12x6x6 box';
-  if (units >= 16) return '13x11x5 box';
-  return null;
+  return place(0, [], [{ x: 0, y: 0, z: 0 }]);
 }
 
-function findShipperByName(shippers = {}, packageName) {
-  if (!packageName) return null;
-  return Object.values(shippers || {}).find((shipper) => shipper.name === packageName || shipper.name?.toLowerCase() === packageName.toLowerCase());
-}
-
-function packageResult({ packageName, shipper, packed }) {
+function effectiveShipperDims(shipper, config = defaultConfig) {
   const dims = normalizeDims(shipper);
   return {
+    ...dims,
+    height: dims.height + (isFlexibleShipper(shipper) ? config.pouch_height_flex : 0)
+  };
+}
+
+function billableWeight(shipper, itemWeightOz, config = defaultConfig) {
+  const dims = normalizeDims(shipper);
+  const actual = itemWeightOz + dims.weight_oz;
+  const volume = dims.length * dims.width * dims.height;
+  if (!config.dim_divisor || volume < config.dim_weight_volume_threshold) return actual;
+  const dimOz = 16 * volume / config.dim_divisor;
+  return Math.max(actual, dimOz);
+}
+
+function packageCost(plan, config = defaultConfig) {
+  const voidVolume = shipperVolume(plan.shipper) - plan.placements.reduce((sum, placement) => sum + placement.l * placement.w * placement.h, 0);
+  return config.w_billable_oz * plan.billable_weight_oz + config.w_void_volume * voidVolume;
+}
+
+function packageResult({ shipper, packed, placements, config = defaultConfig }) {
+  const dims = normalizeDims(shipper);
+  const itemWeight = packed.weight_oz;
+  const billable = billableWeight(shipper, itemWeight, config);
+  const itemVolumeTotal = placements.reduce((sum, placement) => sum + placement.l * placement.w * placement.h, 0);
+  return {
     ok: true,
-    package: packageName,
+    package: shipper.name,
     shipper,
     packed,
+    placements,
+    fill_pct: Math.round((itemVolumeTotal / shipperVolume(shipper)) * 1000) / 10,
+    total_weight_oz: Math.round((itemWeight + dims.weight_oz) * 10000) / 10000,
+    billable_weight_oz: Math.round(billable * 10000) / 10000,
     allocation_package: {
-      weight: Math.max(0.1, packed.weight_oz + dims.weight_oz),
+      weight: Math.max(0.1, itemWeight + dims.weight_oz),
       weight_unit: 'oz',
       width: dims.width,
       height: dims.height,
@@ -123,6 +187,23 @@ function packageResult({ packageName, shipper, packed }) {
       save_for_similar_shipments: false
     }
   };
+}
+
+function tryShipper(shipper, units, packed, config = defaultConfig) {
+  const dims = normalizeDims(shipper);
+  if (!hasDims(dims)) return null;
+  if (isFlexibleShipper(shipper) && units.length > config.max_items_per_pouch) return null;
+  if (config.max_package_weight_oz && packed.weight_oz + dims.weight_oz > config.max_package_weight_oz) return null;
+
+  const effectiveDims = effectiveShipperDims(shipper, config);
+  const itemVolumeTotal = units.reduce((sum, item) => sum + itemVolume(item), 0);
+  if (itemVolumeTotal > effectiveDims.length * effectiveDims.width * effectiveDims.height * config.max_realistic_fill + 1e-9) return null;
+  if (units.some((item) => !fits(item, effectiveDims))) return null;
+
+  const placements = packItems(effectiveDims, units, config, { singleLayer: isFlexibleShipper(shipper) });
+  if (!placements) return null;
+
+  return packageResult({ shipper, packed, placements, config });
 }
 
 export function expandItemsToSingles(items = []) {
@@ -161,8 +242,14 @@ export function calculatePackedDimensions(items = [], settings) {
       return { ok: false, reason: `Missing dimensions for ${item.name || item.sku}.` };
     }
     for (let index = 0; index < Number(item.quantity || 1); index += 1) {
-      const sorted = [dims.length, dims.width, dims.height].sort((a, b) => b - a);
-      units.push({ length: sorted[0], width: sorted[1], height: sorted[2], weight_oz: dims.weight_oz });
+      units.push({
+        sku: item.sku,
+        name: item.name || item.sku,
+        length: dims.length,
+        width: dims.width,
+        height: dims.height,
+        weight_oz: dims.weight_oz
+      });
     }
   }
 
@@ -183,27 +270,17 @@ export function selectShipperForItems(items = [], settings) {
   const packed = calculatePackedDimensions(items, settings);
   if (!packed.ok) return packed;
 
-  const guidePackage = packageGuideForItems(items);
-  const guideShipper = findShipperByName(settings.shippers, guidePackage);
-  if (guidePackage && guideShipper && hasDims(normalizeDims(guideShipper))) {
-    return packageResult({ packageName: guidePackage, shipper: guideShipper, packed });
-  }
-
+  const config = { ...defaultConfig, ...(settings.config || {}) };
   const candidates = Object.values(settings.shippers || {})
-    .filter((shipper) => hasDims(normalizeDims(shipper)))
-    .filter((shipper) => (
-      isFlexibleShipper(shipper)
-        ? packed.unit_count <= 2 && fitsFlexible(packed.units || [], normalizeDims(shipper))
-        : fits(packed, normalizeDims(shipper))
-    ))
-    .sort((a, b) => shipperVolume(a) - shipperVolume(b) || String(a.name).localeCompare(String(b.name)));
+    .map((shipper) => tryShipper(shipper, packed.units || [], packed, config))
+    .filter(Boolean)
+    .sort((a, b) => packageCost(a, config) - packageCost(b, config) || shipperVolume(a.shipper) - shipperVolume(b.shipper) || String(a.package).localeCompare(String(b.package)));
 
   if (!candidates.length) {
     return { ok: false, reason: 'No configured shipper fits this item mix.', packed };
   }
 
-  const shipper = candidates[0];
-  return packageResult({ packageName: shipper.name, shipper, packed });
+  return candidates[0];
 }
 
 export function orderPackageInput(order, items) {
@@ -228,7 +305,15 @@ export function packageOrdersForBatch(packageOrders = [], settings) {
       failed.push({ ...order, reason: result.reason });
       continue;
     }
-    ok.push({ ...order, package: result.package, allocation_package: result.allocation_package });
+    ok.push({
+      ...order,
+      package: result.package,
+      allocation_package: result.allocation_package,
+      placements: result.placements,
+      fill_pct: result.fill_pct,
+      total_weight_oz: result.total_weight_oz,
+      billable_weight_oz: result.billable_weight_oz
+    });
   }
   return { ok, failed };
 }
