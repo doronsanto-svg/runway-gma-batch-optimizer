@@ -93,6 +93,10 @@ function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function moneyOrDash(value) {
+  return value === null || value === undefined ? '-' : money(value);
+}
+
 function minutes(value) {
   if (value < 1) return '<1 min';
   if (value < 60) return `${Math.round(value)} min`;
@@ -382,19 +386,24 @@ function renderUnitBreakdown(report = currentReport) {
   `;
 }
 
-function renderSalesRows(rows = []) {
+function renderSalesRows(rows = [], report = salesReport, kind = 'product') {
   if (!rows.length) return '<p class="empty">No sales found for this channel.</p>';
+  const supportsProcessing = report?.supports_processing !== false;
+  const supportsSalesAmount = report?.supports_sales_amount !== false || rows.some((row) => row.sales !== null && row.sales !== undefined);
+  const expandedLabel = kind === 'kit' ? 'Single Units Inside' : 'Exact Single Units';
+  const tableClass = `sales-table ${supportsProcessing ? 'with-processing' : 'without-processing'} ${supportsSalesAmount ? 'with-sales' : 'without-sales'}`;
   return `
-    <div class="data-table sales-table">
+    <div class="data-table ${tableClass}">
       <div class="table-row table-head">
-        <span>Item</span><span>Sold</span><span>Processed</span><span>Unprocessed</span>
+        <span>Item</span><span>Sold</span><span>${expandedLabel}</span>${supportsProcessing ? '<span>Processed</span><span>Unprocessed</span>' : ''}${supportsSalesAmount ? '<span>Sales $</span>' : ''}
       </div>
       ${rows.map((row) => `
         <div class="table-row">
           <span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.sku)}</small></span>
           <span>${Number(row.sold || 0)}</span>
-          <span>${Number(row.processed || 0)}</span>
-          <span>${Number(row.unprocessed || 0)}</span>
+          <span>${Number(row.expanded_units || row.sold || 0)}</span>
+          ${supportsProcessing ? `<span>${Number(row.processed || 0)}</span><span>${Number(row.unprocessed || 0)}</span>` : ''}
+          ${supportsSalesAmount ? `<span>${moneyOrDash(row.sales)}</span>` : ''}
         </div>
       `).join('')}
     </div>
@@ -414,31 +423,37 @@ function renderSalesReport(report = salesReport) {
   }
 
   const summary = report.summary || {};
+  const supportsProcessing = report.supports_processing !== false;
+  const supportsOrderPull = report.orders_pulled !== null && report.orders_pulled !== undefined;
+  const supportsPages = report.pages_pulled !== null && report.pages_pulled !== undefined;
   salesGeneratedAt.textContent = report.generated_at ? new Date(report.generated_at).toLocaleString() : 'Loaded';
   salesSummaryGrid.innerHTML = [
     metric('Source', report.data_source || 'Veeqo order history'),
     metric('Channel', report.channel_filter || 'All channels'),
-    metric('Orders Pulled', report.orders_pulled ?? 0),
-    metric('Sales Orders', summary.source_orders ?? 0),
-    metric('Processed Orders', summary.processed_orders ?? 0),
-    metric('Unprocessed Orders', summary.unprocessed_orders ?? 0),
-    metric('Single Units Sold', summary.single_units_sold ?? 0),
-    metric('Units Processed', summary.single_units_processed ?? 0),
-    metric('Units Unprocessed', summary.single_units_unprocessed ?? 0),
+    supportsOrderPull ? metric('Orders Pulled', report.orders_pulled ?? 0) : '',
+    summary.source_orders !== null && summary.source_orders !== undefined ? metric('Sales Orders', summary.source_orders) : '',
+    supportsProcessing ? metric('Processed Orders', summary.processed_orders ?? 0) : '',
+    supportsProcessing ? metric('Unprocessed Orders', summary.unprocessed_orders ?? 0) : '',
+    metric('Sold as Single SKUs', summary.single_units_sold ?? 0),
+    metric('Exact Single Units', summary.single_units_expanded ?? summary.single_units_sold ?? 0),
+    supportsProcessing ? metric('Units Processed', summary.single_units_processed ?? 0) : '',
+    supportsProcessing ? metric('Units Unprocessed', summary.single_units_unprocessed ?? 0) : '',
     metric('Kits Sold', summary.kits_sold ?? 0),
-    metric('Kits Processed', summary.kits_processed ?? 0),
-    metric('Kits Unprocessed', summary.kits_unprocessed ?? 0),
-    metric('Veeqo Pages', report.veeqo_total_pages ? `${report.pages_pulled || report.veeqo_total_pages}/${report.veeqo_total_pages}` : 'Unknown'),
-    metric('History Window', `${report.pages_pulled || 0} page${Number(report.pages_pulled || 0) === 1 ? '' : 's'}`),
+    metric('Units Inside Kits', summary.kit_expanded_units ?? 0),
+    supportsProcessing ? metric('Kits Processed', summary.kits_processed ?? 0) : '',
+    supportsProcessing ? metric('Kits Unprocessed', summary.kits_unprocessed ?? 0) : '',
+    metric('Sales $', moneyOrDash(summary.total_sales)),
+    supportsPages ? metric('Veeqo Pages', report.veeqo_total_pages ? `${report.pages_pulled || report.veeqo_total_pages}/${report.veeqo_total_pages}` : 'Unknown') : '',
+    supportsPages ? metric('History Window', `${report.pages_pulled || 0} page${Number(report.pages_pulled || 0) === 1 ? '' : 's'}`) : '',
     metric('Skipped Non-GMA', summary.skipped_no_gma ?? 0),
     metric('No Items', summary.skipped_no_items ?? 0)
-  ].join('');
+  ].filter(Boolean).join('');
   const productRows = report.products || [];
   const kitRows = report.kits || [];
   singleUnitSellerCount.textContent = productRows.length;
   kitSellerCount.textContent = kitRows.length;
-  singleUnitSalesTable.innerHTML = renderSalesRows(productRows);
-  kitSalesTable.innerHTML = renderSalesRows(kitRows);
+  singleUnitSalesTable.innerHTML = renderSalesRows(productRows, report, 'product');
+  kitSalesTable.innerHTML = renderSalesRows(kitRows, report, 'kit');
 }
 
 function prepMatrixRows(rows) {

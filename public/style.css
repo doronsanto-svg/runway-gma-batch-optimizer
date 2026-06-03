@@ -268,8 +268,23 @@ main {
 }
 
 .sales-table .table-row {
-  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(90px, 0.6fr));
   min-width: 620px;
+}
+
+.sales-table.without-processing.without-sales .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(120px, 0.6fr));
+}
+
+.sales-table.without-processing.with-sales .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(120px, 0.6fr));
+}
+
+.sales-table.with-processing.without-sales .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(100px, 0.6fr));
+}
+
+.sales-table.with-processing.with-sales .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(5, minmax(100px, 0.6fr));
 }
 
 .sales-table small {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSalesReport } from '../src/sales-report.js';
+import { buildProductSalesSnapshotReport, buildSalesReport } from '../src/sales-report.js';
+import { shopifyProductSalesSnapshot } from '../src/sales-snapshot.js';
 
 function order({ id, number, channel = 'Runway by Christian Siriano', lineItems = [] }) {
   return {
@@ -83,4 +84,19 @@ test('buildSalesReport tracks kit top sellers separately from physical single un
   assert.equal(report.top_kits[0].sku, 'PL-RW-TOR2-R');
   assert.equal(report.top_kits[0].sold, 3);
   assert.equal(report.top_single_units[0].sold, 4);
+});
+
+test('buildProductSalesSnapshotReport matches Shopify product count snapshot and expands kits', () => {
+  const report = buildProductSalesSnapshotReport({ productSales: shopifyProductSalesSnapshot });
+  const bySku = new Map(report.products.map((row) => [row.sku, row]));
+  const kitsBySku = new Map(report.kits.map((row) => [row.sku, row]));
+
+  assert.equal(report.summary.single_units_sold + report.summary.kits_sold, 4142);
+  assert.equal(report.summary.single_units_expanded, 6832);
+  assert.equal(kitsBySku.get('PL-RW-TOR2-R').sold, 1060);
+  assert.equal(bySku.get('PL-RW-SB15-R').sold, 676);
+  assert.equal(bySku.get('PL-RW-SB15-R').expanded_units, 1968);
+  assert.equal(bySku.get('PL-RW-AA90-R').expanded_units, 1729);
+  assert.equal(bySku.get('PL-RW-FT72-R').expanded_units, 1004);
+  assert.equal(bySku.get('PL-RW-BTS100-R').expanded_units, 414);
 });

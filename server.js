@@ -12,7 +12,8 @@ import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, set
 import { analyzeOrderIssues } from './src/order-issues.js';
 import { packageOrdersForBatch } from './src/packaging-calculator.js';
 import { readPackagingSettings, writePackagingSettings } from './src/packaging-store.js';
-import { buildSalesReport } from './src/sales-report.js';
+import { buildProductSalesSnapshotReport, buildSalesReport } from './src/sales-report.js';
+import { shopifyProductSalesSnapshot } from './src/sales-snapshot.js';
 
 loadEnv();
 
@@ -548,6 +549,15 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/sales-report') {
+      const source = url.searchParams.get('source') || process.env.SALES_REPORT_SOURCE || 'shopify_snapshot';
+      if (source !== 'veeqo') {
+        sendJson(response, 200, buildProductSalesSnapshotReport({
+          productSales: shopifyProductSalesSnapshot,
+          dataSource: 'Shopify product report snapshot'
+        }));
+        return;
+      }
+
       const pageSize = Number.parseInt(process.env.VEEQO_SALES_PAGE_SIZE || process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
       const maxPages = Number.parseInt(url.searchParams.get('pages') || process.env.VEEQO_SALES_MAX_PAGES || '5', 10);
       const maxMs = Number.parseInt(process.env.VEEQO_SALES_MAX_MS || '20000', 10);
