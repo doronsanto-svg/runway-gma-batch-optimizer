@@ -10,7 +10,7 @@ const defaultConfig = {
   w_void_volume: 0.01,
   backtrack_node_cap: 20000,
   pouch_height_flex: 0.5,
-  max_items_per_pouch: 2
+  max_items_per_pouch: 3
 };
 
 function number(value) {
