@@ -120,7 +120,7 @@ export function selectShipperForItems(items = [], settings) {
     .filter((shipper) => hasDims(normalizeDims(shipper)))
     .filter((shipper) => (
       isFlexibleShipper(shipper)
-        ? fitsFlexible(packed.units || [], normalizeDims(shipper))
+        ? packed.unit_count <= 2 && fitsFlexible(packed.units || [], normalizeDims(shipper))
         : fits(packed, normalizeDims(shipper))
     ))
     .sort((a, b) => shipperVolume(a) - shipperVolume(b) || String(a.name).localeCompare(String(b.name)));
