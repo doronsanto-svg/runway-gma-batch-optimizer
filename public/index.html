@@ -6,7 +6,7 @@
     <title>Runway GMA Batch Optimizer</title>
     <link rel="icon" type="image/png" href="/odi-icon.png">
     <link rel="apple-touch-icon" href="/odi-icon.png">
-    <link rel="stylesheet" href="/style.css?v=20260602-4">
+    <link rel="stylesheet" href="/style.css?v=20260603-1">
   </head>
   <body>
     <header class="topbar">
@@ -20,6 +20,7 @@
       <div class="actions">
         <button class="view-button active" type="button" data-view="dashboardView">Dashboard</button>
         <button class="view-button" type="button" data-view="prepView">Prep</button>
+        <button class="view-button" type="button" data-view="salesView">Sales</button>
         <button class="view-button" type="button" data-view="issuesView">Issues</button>
         <button class="view-button" type="button" data-view="historyView">History</button>
         <button class="view-button" type="button" data-view="settingsView">Settings</button>
@@ -161,6 +162,41 @@
         </section>
       </section>
 
+      <section id="salesView" class="view">
+        <section class="clusters collapsible-section" data-collapse-key="salesReport">
+          <div class="section-heading">
+            <button class="collapse-toggle" type="button" aria-expanded="true">
+              <span class="collapse-caret">▾</span>
+              <h2>Sales Report</h2>
+            </button>
+            <div class="heading-actions">
+              <span id="salesGeneratedAt">Not loaded</span>
+              <button id="salesRefreshButton" type="button">Refresh Sales</button>
+            </div>
+          </div>
+          <div class="collapsible-content">
+            <div class="notice">Sales report is read-only. It compares Veeqo order history against completed batches in Fillement.</div>
+            <section class="summary-grid compact-grid" id="salesSummaryGrid"></section>
+            <div class="sales-report-grid">
+              <section>
+                <div class="section-heading">
+                  <h2>Single Units</h2>
+                  <span id="singleUnitSellerCount">0</span>
+                </div>
+                <div id="singleUnitSalesTable"></div>
+              </section>
+              <section>
+                <div class="section-heading">
+                  <h2>Kits</h2>
+                  <span id="kitSellerCount">0</span>
+                </div>
+                <div id="kitSalesTable"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </section>
+
       <section id="issuesView" class="view">
         <section class="summary-grid compact-grid" id="issueSummaryGrid"></section>
         <section class="clusters collapsible-section" data-collapse-key="issueOrders">
@@ -219,6 +255,6 @@
     </main>
 
     <div id="statusToast" class="toast" hidden></div>
-    <script src="/app.js?v=20260602-4"></script>
+    <script src="/app.js?v=20260603-1"></script>
   </body>
 </html>

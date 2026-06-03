@@ -18,6 +18,13 @@ const prepSummaryGrid = document.querySelector('#prepSummaryGrid');
 const prepTable = document.querySelector('#prepTable');
 const prepTableCount = document.querySelector('#prepTableCount');
 const printPrepButton = document.querySelector('#printPrepButton');
+const salesRefreshButton = document.querySelector('#salesRefreshButton');
+const salesGeneratedAt = document.querySelector('#salesGeneratedAt');
+const salesSummaryGrid = document.querySelector('#salesSummaryGrid');
+const singleUnitSalesTable = document.querySelector('#singleUnitSalesTable');
+const singleUnitSellerCount = document.querySelector('#singleUnitSellerCount');
+const kitSalesTable = document.querySelector('#kitSalesTable');
+const kitSellerCount = document.querySelector('#kitSellerCount');
 const issueSummaryGrid = document.querySelector('#issueSummaryGrid');
 const issueTable = document.querySelector('#issueTable');
 const issueTableCount = document.querySelector('#issueTableCount');
@@ -34,6 +41,7 @@ const savePackagingButton = document.querySelector('#savePackagingButton');
 let currentReport = null;
 let batchState = { active: [], completed: [] };
 let prepState = { rows: [], summary: {} };
+let salesReport = null;
 let selectedPrepKeys = new Set();
 let packagingSettings = { products: {}, shippers: {} };
 let portalConfig = {
@@ -372,6 +380,64 @@ function renderUnitBreakdown(report = currentReport) {
       </div>
     </div>
   `;
+}
+
+function renderSalesRows(rows = []) {
+  if (!rows.length) return '<p class="empty">No sales found for this channel.</p>';
+  return `
+    <div class="data-table sales-table">
+      <div class="table-row table-head">
+        <span>Item</span><span>Sold</span><span>Processed</span><span>Unprocessed</span>
+      </div>
+      ${rows.map((row) => `
+        <div class="table-row">
+          <span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.sku)}</small></span>
+          <span>${Number(row.sold || 0)}</span>
+          <span>${Number(row.processed || 0)}</span>
+          <span>${Number(row.unprocessed || 0)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderSalesReport(report = salesReport) {
+  if (!salesSummaryGrid || !singleUnitSalesTable || !kitSalesTable) return;
+  if (!report) {
+    salesGeneratedAt.textContent = 'Not loaded';
+    salesSummaryGrid.innerHTML = '<div class="metric"><span>Status</span><strong>Refresh sales to load</strong></div>';
+    singleUnitSellerCount.textContent = '0';
+    kitSellerCount.textContent = '0';
+    singleUnitSalesTable.innerHTML = '<p class="empty">Refresh sales to load history.</p>';
+    kitSalesTable.innerHTML = '<p class="empty">Refresh sales to load history.</p>';
+    return;
+  }
+
+  const summary = report.summary || {};
+  salesGeneratedAt.textContent = report.generated_at ? new Date(report.generated_at).toLocaleString() : 'Loaded';
+  salesSummaryGrid.innerHTML = [
+    metric('Source', report.data_source || 'Veeqo order history'),
+    metric('Channel', report.channel_filter || 'All channels'),
+    metric('Orders Pulled', report.orders_pulled ?? 0),
+    metric('Sales Orders', summary.source_orders ?? 0),
+    metric('Processed Orders', summary.processed_orders ?? 0),
+    metric('Unprocessed Orders', summary.unprocessed_orders ?? 0),
+    metric('Single Units Sold', summary.single_units_sold ?? 0),
+    metric('Units Processed', summary.single_units_processed ?? 0),
+    metric('Units Unprocessed', summary.single_units_unprocessed ?? 0),
+    metric('Kits Sold', summary.kits_sold ?? 0),
+    metric('Kits Processed', summary.kits_processed ?? 0),
+    metric('Kits Unprocessed', summary.kits_unprocessed ?? 0),
+    metric('Veeqo Pages', report.veeqo_total_pages ? `${report.pages_pulled || report.veeqo_total_pages}/${report.veeqo_total_pages}` : 'Unknown'),
+    metric('Skipped Non-GMA', summary.skipped_no_gma ?? 0),
+    metric('No Items', summary.skipped_no_items ?? 0)
+  ].join('');
+  const productRows = report.products || [];
+  const kitRows = report.kits || [];
+  singleUnitSellerCount.textContent = productRows.length;
+  kitSellerCount.textContent = kitRows.length;
+  singleUnitSalesTable.innerHTML = renderSalesRows(productRows);
+  kitSalesTable.innerHTML = renderSalesRows(kitRows);
 }
 
 function prepMatrixRows(rows) {
@@ -1278,6 +1344,24 @@ async function loadPrep() {
   renderPrepView();
 }
 
+async function loadSalesReport(button = salesRefreshButton) {
+  setButtonProcessing(button, true, 'Loading...');
+  try {
+    const params = new URLSearchParams();
+    if (channelInput.value.trim()) params.set('channel', channelInput.value.trim());
+    const response = await handleAuthResponse(await fetch(`/api/sales-report?${params.toString()}`));
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error || 'Sales report failed');
+    salesReport = report;
+    renderSalesReport(report);
+    showToast('Sales report refreshed.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 function parseDataItems(value) {
   try {
     return JSON.parse(value || '[]');
@@ -1665,6 +1749,7 @@ carrierRefreshButton.addEventListener('click', () => refreshAnalysis({ refreshCa
 demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
 channelScanButton.addEventListener('click', scanChannels);
 printPrepButton.addEventListener('click', printPrepSheet);
+salesRefreshButton?.addEventListener('click', () => loadSalesReport(salesRefreshButton));
 logoutButton.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';
@@ -1675,6 +1760,7 @@ document.querySelectorAll('.view-button').forEach((button) => {
   button.addEventListener('click', () => {
     document.querySelectorAll('.view-button').forEach((item) => item.classList.toggle('active', item === button));
     document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active-view', view.id === button.dataset.view));
+    if (button.dataset.view === 'salesView' && !salesReport) loadSalesReport(salesRefreshButton);
   });
 });
 document.addEventListener('click', (event) => {

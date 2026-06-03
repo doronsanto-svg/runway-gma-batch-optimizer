@@ -261,6 +261,24 @@ main {
   font-weight: 900;
 }
 
+.sales-report-grid {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.sales-table .table-row {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(90px, 0.6fr));
+  min-width: 620px;
+}
+
+.sales-table small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
 .dimension-table {
   margin: 12px 0 22px;
 }
@@ -757,6 +775,10 @@ main {
   }
 
   .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-report-grid {
     grid-template-columns: 1fr;
   }
 

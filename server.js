@@ -12,6 +12,7 @@ import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, set
 import { analyzeOrderIssues } from './src/order-issues.js';
 import { packageOrdersForBatch } from './src/packaging-calculator.js';
 import { readPackagingSettings, writePackagingSettings } from './src/packaging-store.js';
+import { buildSalesReport } from './src/sales-report.js';
 
 loadEnv();
 
@@ -186,6 +187,10 @@ function findActionableBatch(report, subBatchId) {
 
 function unavailableOrderIds(store = readBatchStore()) {
   return new Set([...(store.active || []), ...(store.completed || [])].flatMap((batch) => batch.order_ids || []));
+}
+
+function completedOrderIds(store = readBatchStore()) {
+  return new Set((store.completed || []).flatMap((batch) => batch.order_ids || []));
 }
 
 function uniqueValues(values = []) {
@@ -539,6 +544,22 @@ const server = createServer(async (request, response) => {
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
       });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/sales-report') {
+      const pageSize = Number.parseInt(process.env.VEEQO_SALES_PAGE_SIZE || process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
+      const maxPages = Number.parseInt(process.env.VEEQO_SALES_MAX_PAGES || '1000', 10);
+      const result = await makeVeeqoClient().listAllOrders({ status: '', pageSize, maxPages });
+      sendJson(response, 200, buildSalesReport({
+        orders: result.orders,
+        channelFilter: url.searchParams.get('channel') || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
+        completedOrderIds: completedOrderIds(),
+        dataSource: 'Veeqo order history',
+        totalCount: result.totalCount,
+        totalPages: result.totalPages,
+        pagesPulled: result.totalPages ? Math.min(result.totalPages, maxPages) : null
+      }));
       return;
     }
 
