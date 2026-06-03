@@ -90,7 +90,7 @@ test('packageSuggestionForRow uses calculated package before learned memory', ()
     prepared: {}
   });
 
-  assert.equal(suggestion.packageName, '6x10 pouch');
+  assert.equal(suggestion.packageName, '8x10x2');
   assert.equal(suggestion.source, 'calculated');
 });
 

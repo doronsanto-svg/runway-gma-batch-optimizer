@@ -52,10 +52,13 @@ function defaultProducts() {
 function defaultShippers() {
   return {
     '6x10 pouch': { name: '6x10 pouch', length: 10, width: 6, height: 1, weight_oz: 0 },
+    '6x10x2': { name: '6x10x2', length: 10, width: 6, height: 2, weight_oz: 0 },
+    '8x10x2': { name: '8x10x2', length: 10, width: 8, height: 2, weight_oz: 0 },
     '8x12 pouch': { name: '8x12 pouch', length: 12, width: 8, height: 1.5, weight_oz: 0 },
     '8x6x4 box': { name: '8x6x4 box', length: 8, width: 6, height: 4, weight_oz: 0 },
     '10x6x6 box': { name: '10x6x6 box', length: 10, width: 6, height: 6, weight_oz: 0 },
-    '12x6x6 box': { name: '12x6x6 box', length: 12, width: 6, height: 6, weight_oz: 0 }
+    '12x6x6 box': { name: '12x6x6 box', length: 12, width: 6, height: 6, weight_oz: 0 },
+    '13x11x5 box': { name: '13x11x5 box', length: 13, width: 11, height: 5, weight_oz: 0 }
   };
 }
 

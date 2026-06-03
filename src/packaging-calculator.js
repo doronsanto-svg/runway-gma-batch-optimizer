@@ -1,6 +1,21 @@
 import { GMA_SKUS } from './constants.js';
 import { getPrimaryAllocationId } from './veeqo.js';
 
+const skuPackageGuide = {
+  'PL-RW-FL30-R': '6x10 pouch',
+  'PL-RW-BTS100-R': '8x10x2',
+  'PL-RW-SL30-R': '6x10x2',
+  'PL-RW-SB15-R': '6x10x2',
+  'PL-RW-RR50-R': '6x10x2',
+  'PL-RW-AA90-R': '6x10x2',
+  'PL-RW-FT72-R': '6x10x2',
+  'PL-RW-TRE3-R': '8x6x4 box',
+  'PL-RW-TOR2-R': '8x10x2',
+  'PL-RW-TGP4-R': '8x6x4 box',
+  'PL-RW-TDTNR5-R': '8x6x4 box',
+  'PL-RW-TFR7-R': '8x6x4 box'
+};
+
 function number(value) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -56,6 +71,58 @@ function fitsFlexible(units = [], shipperDims) {
 function shipperVolume(shipper) {
   const dims = normalizeDims(shipper);
   return dims.length * dims.width * dims.height;
+}
+
+function itemPhysicalUnits(item) {
+  const skuPieces = GMA_SKUS[item.sku]?.pieces || 1;
+  return Number(item.quantity || 1) * skuPieces;
+}
+
+function totalPhysicalUnits(items = []) {
+  return (items || []).reduce((sum, item) => sum + itemPhysicalUnits(item), 0);
+}
+
+function packageGuideForItems(items = []) {
+  const normalizedItems = items || [];
+  if (normalizedItems.length === 1 && Number(normalizedItems[0].quantity || 1) === 1) {
+    const directPackage = skuPackageGuide[normalizedItems[0].sku];
+    if (directPackage) return directPackage;
+  }
+
+  const units = totalPhysicalUnits(normalizedItems);
+  if (units === 1) return skuPackageGuide[normalizedItems[0]?.sku] || '6x10x2';
+  if (units === 2) return '8x10x2';
+  if (units >= 3 && units <= 8) return '8x6x4 box';
+  if (units >= 9 && units <= 12) return '10x6x6 box';
+  if (units >= 13 && units <= 15) return '12x6x6 box';
+  if (units >= 16) return '13x11x5 box';
+  return null;
+}
+
+function findShipperByName(shippers = {}, packageName) {
+  if (!packageName) return null;
+  return Object.values(shippers || {}).find((shipper) => shipper.name === packageName || shipper.name?.toLowerCase() === packageName.toLowerCase());
+}
+
+function packageResult({ packageName, shipper, packed }) {
+  const dims = normalizeDims(shipper);
+  return {
+    ok: true,
+    package: packageName,
+    shipper,
+    packed,
+    allocation_package: {
+      weight: Math.max(0.1, packed.weight_oz + dims.weight_oz),
+      weight_unit: 'oz',
+      width: dims.width,
+      height: dims.height,
+      depth: dims.length,
+      dimensions_unit: 'inches',
+      package_provider: 'CUSTOM',
+      package_selection_source: 'ONE_OFF',
+      save_for_similar_shipments: false
+    }
+  };
 }
 
 export function expandItemsToSingles(items = []) {
@@ -116,6 +183,12 @@ export function selectShipperForItems(items = [], settings) {
   const packed = calculatePackedDimensions(items, settings);
   if (!packed.ok) return packed;
 
+  const guidePackage = packageGuideForItems(items);
+  const guideShipper = findShipperByName(settings.shippers, guidePackage);
+  if (guidePackage && guideShipper && hasDims(normalizeDims(guideShipper))) {
+    return packageResult({ packageName: guidePackage, shipper: guideShipper, packed });
+  }
+
   const candidates = Object.values(settings.shippers || {})
     .filter((shipper) => hasDims(normalizeDims(shipper)))
     .filter((shipper) => (
@@ -130,23 +203,7 @@ export function selectShipperForItems(items = [], settings) {
   }
 
   const shipper = candidates[0];
-  const dims = normalizeDims(shipper);
-  return {
-    ok: true,
-    package: shipper.name,
-    shipper,
-    allocation_package: {
-      weight: Math.max(0.1, packed.weight_oz + dims.weight_oz),
-      weight_unit: 'oz',
-      width: dims.width,
-      height: dims.height,
-      depth: dims.length,
-      dimensions_unit: 'inches',
-      package_provider: 'CUSTOM',
-      package_selection_source: 'ONE_OFF',
-      save_for_similar_shipments: false
-    }
-  };
+  return packageResult({ packageName: shipper.name, shipper, packed });
 }
 
 export function orderPackageInput(order, items) {
