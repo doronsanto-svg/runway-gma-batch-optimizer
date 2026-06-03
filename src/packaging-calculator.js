@@ -35,6 +35,13 @@ function isFlexibleShipper(shipper = {}) {
   return shipper.kind === 'pouch' || /pouch|poly|mailer|envelope/i.test(String(shipper.name || ''));
 }
 
+function maxItemsForShipper(shipper = {}, config = defaultConfig) {
+  const explicitMax = Number.parseInt(shipper.max_items, 10);
+  if (Number.isFinite(explicitMax) && explicitMax > 0) return explicitMax;
+  if (/^6x10\b/i.test(String(shipper.name || ''))) return 1;
+  return config.max_items_per_pouch;
+}
+
 function dimensionOrientations(dims) {
   const values = Array.isArray(dims) ? dims : [dims.length, dims.width, dims.height];
   const candidates = [
@@ -192,7 +199,7 @@ function packageResult({ shipper, packed, placements, config = defaultConfig }) 
 function tryShipper(shipper, units, packed, config = defaultConfig) {
   const dims = normalizeDims(shipper);
   if (!hasDims(dims)) return null;
-  if (isFlexibleShipper(shipper) && units.length > config.max_items_per_pouch) return null;
+  if (isFlexibleShipper(shipper) && units.length > maxItemsForShipper(shipper, config)) return null;
   if (config.max_package_weight_oz && packed.weight_oz + dims.weight_oz > config.max_package_weight_oz) return null;
 
   const effectiveDims = effectiveShipperDims(shipper, config);

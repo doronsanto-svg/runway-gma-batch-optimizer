@@ -12,8 +12,8 @@ const settings = {
     'PL-RW-FT72-R': { name: 'Finishing Touch', length: 8, width: 5, height: 1, weight_oz: 3 }
   },
   shippers: {
-    '6x10 pouch': { name: '6x10 pouch', length: 8, width: 6, height: 2, weight_oz: 0.5, kind: 'pouch' },
-    '8x12 pouch': { name: '8x12 pouch', length: 10, width: 8, height: 2, weight_oz: 0.5, kind: 'pouch' },
+    '6x10 pouch': { name: '6x10 pouch', length: 8, width: 6, height: 2, weight_oz: 0.5, kind: 'pouch', max_items: 1 },
+    '8x12 pouch': { name: '8x12 pouch', length: 10, width: 8, height: 2, weight_oz: 0.5, kind: 'pouch', max_items: 2 },
     '8x6x4 box': { name: '8x6x4 box', length: 8, width: 6, height: 4, weight_oz: 1, kind: 'box' },
     '10x6x6 box': { name: '10x6x6 box', length: 10, width: 6, height: 6, weight_oz: 1, kind: 'box' },
     '12x6x6 box': { name: '12x6x6 box', length: 12, width: 6, height: 6, weight_oz: 1, kind: 'box' },
@@ -31,7 +31,7 @@ test('selectShipperForItems chooses the verified cheapest single-product shipper
   assert.ok(result.placements.length === 1);
 });
 
-test('selectShipperForItems allows two verified products in a pouch', () => {
+test('selectShipperForItems moves two products out of the 6x10 pouch', () => {
   const result = selectShipperForItems([
     {
       sku: 'PL-RW-TOR2-R',
@@ -45,7 +45,7 @@ test('selectShipperForItems allows two verified products in a pouch', () => {
   ], settings);
 
   assert.equal(result.ok, true);
-  assert.equal(result.package, '6x10 pouch');
+  assert.equal(result.package, '8x12 pouch');
   assert.equal(result.placements.length, 2);
 });
 
