@@ -294,6 +294,33 @@ main {
   margin-top: 3px;
 }
 
+.tracking-table .table-row {
+  grid-template-columns: 70px minmax(150px, 0.9fr) minmax(160px, 1fr) 90px minmax(190px, 1.2fr) minmax(150px, 0.9fr) minmax(180px, 1.1fr) 100px;
+  min-width: 1220px;
+}
+
+.tracking-audit-table .table-row {
+  grid-template-columns: minmax(240px, 1.4fr) 100px 80px minmax(160px, 1fr) minmax(160px, 1fr) 150px;
+  min-width: 980px;
+}
+
+.tracking-table small,
+.tracking-audit-table small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.tracking-row-select {
+  height: 22px;
+  width: 22px;
+}
+
+.review-row {
+  background: #fff6df;
+}
+
 .dimension-table {
   margin: 12px 0 22px;
 }

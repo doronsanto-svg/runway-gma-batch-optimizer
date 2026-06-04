@@ -14,6 +14,7 @@ import { packageOrdersForBatch } from './src/packaging-calculator.js';
 import { readPackagingSettings, writePackagingSettings } from './src/packaging-store.js';
 import { buildProductSalesSnapshotReport, buildSalesReport } from './src/sales-report.js';
 import { shopifyProductSalesSnapshot } from './src/sales-snapshot.js';
+import { markTrackingExportUploaded, readTrackingAudit, recordTrackingExport, rowsToTrackingCsv, trackingRowsFromOrders } from './src/tracking-repair.js';
 
 loadEnv();
 
@@ -39,6 +40,14 @@ function sendJson(response, statusCode, payload) {
 function sendHtml(response, statusCode, html) {
   response.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
   response.end(html);
+}
+
+function sendCsv(response, filename, csv) {
+  response.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`
+  });
+  response.end(csv);
 }
 
 async function readJsonBody(request) {
@@ -513,6 +522,60 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/prep') {
       sendJson(response, 200, latestPrepPayload());
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/tracking-repair/audit') {
+      sendJson(response, 200, readTrackingAudit());
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/tracking-repair/scan') {
+      const status = url.searchParams.get('status') || process.env.VEEQO_TRACKING_REPAIR_STATUS || 'shipped';
+      const pageSize = Number.parseInt(process.env.VEEQO_TRACKING_REPAIR_PAGE_SIZE || process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
+      const maxPages = Number.parseInt(process.env.VEEQO_TRACKING_REPAIR_MAX_PAGES || '20', 10);
+      const result = await makeVeeqoClient().listAllOrders({ status, pageSize, maxPages, maxMs: 20000 });
+      const rows = trackingRowsFromOrders(result.orders, {
+        channelFilter: url.searchParams.get('channel') || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
+        config: issueConfig()
+      });
+      sendJson(response, 200, {
+        status,
+        orders_pulled: result.orders.length,
+        pages_pulled: result.pagesPulled,
+        rows,
+        summary: {
+          total: rows.length,
+          eligible: rows.filter((row) => row.eligible).length,
+          not_eligible: rows.filter((row) => !row.eligible).length
+        },
+        audit: readTrackingAudit()
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/tracking-repair/export') {
+      const body = await readJsonBody(request);
+      const rows = Array.isArray(body.rows) ? body.rows.filter((row) => row?.eligible) : [];
+      if (!rows.length) {
+        sendJson(response, 400, { error: 'Select at least one eligible tracking row.' });
+        return;
+      }
+      const filename = `tracking-corrections-${new Date().toISOString().slice(0, 10)}-${Date.now()}.csv`;
+      recordTrackingExport({ rows, filename });
+      sendCsv(response, filename, rowsToTrackingCsv(rows));
+      return;
+    }
+
+    const trackingUploadedMatch = url.pathname.match(/^\/api\/tracking-repair\/exports\/([^/]+)\/uploaded$/);
+    if (request.method === 'POST' && trackingUploadedMatch) {
+      const exportId = decodeURIComponent(trackingUploadedMatch[1]);
+      const record = markTrackingExportUploaded(exportId);
+      if (!record) {
+        sendJson(response, 404, { error: 'Tracking export not found.' });
+        return;
+      }
+      sendJson(response, 200, { export: record, audit: readTrackingAudit() });
       return;
     }
 

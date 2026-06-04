@@ -25,6 +25,13 @@ const singleUnitSalesTable = document.querySelector('#singleUnitSalesTable');
 const singleUnitSellerCount = document.querySelector('#singleUnitSellerCount');
 const kitSalesTable = document.querySelector('#kitSalesTable');
 const kitSellerCount = document.querySelector('#kitSellerCount');
+const trackingRepairSummaryGrid = document.querySelector('#trackingRepairSummaryGrid');
+const trackingRepairCount = document.querySelector('#trackingRepairCount');
+const trackingRepairScanButton = document.querySelector('#trackingRepairScanButton');
+const trackingRepairExportButton = document.querySelector('#trackingRepairExportButton');
+const trackingRepairTable = document.querySelector('#trackingRepairTable');
+const trackingRepairAuditCount = document.querySelector('#trackingRepairAuditCount');
+const trackingRepairAuditTable = document.querySelector('#trackingRepairAuditTable');
 const issueSummaryGrid = document.querySelector('#issueSummaryGrid');
 const issueTable = document.querySelector('#issueTable');
 const issueTableCount = document.querySelector('#issueTableCount');
@@ -42,6 +49,8 @@ let currentReport = null;
 let batchState = { active: [], completed: [] };
 let prepState = { rows: [], summary: {} };
 let salesReport = null;
+let trackingRepairState = { rows: [], summary: {}, audit: { exports: [] } };
+let selectedTrackingKeys = new Set();
 let selectedPrepKeys = new Set();
 let packagingSettings = { products: {}, shippers: {} };
 let portalConfig = {
@@ -454,6 +463,75 @@ function renderSalesReport(report = salesReport) {
   kitSellerCount.textContent = kitRows.length;
   singleUnitSalesTable.innerHTML = renderSalesRows(productRows, report, 'product');
   kitSalesTable.innerHTML = renderSalesRows(kitRows, report, 'kit');
+}
+
+function renderTrackingRepair(state = trackingRepairState) {
+  if (!trackingRepairSummaryGrid || !trackingRepairTable || !trackingRepairCount) return;
+  const rows = state.rows || [];
+  const summary = state.summary || {};
+  const eligibleRows = rows.filter((row) => row.eligible);
+  const visibleKeys = new Set(eligibleRows.map((row) => row.key));
+  selectedTrackingKeys = new Set([...selectedTrackingKeys].filter((key) => visibleKeys.has(key)));
+
+  trackingRepairSummaryGrid.innerHTML = [
+    metric('Rows Found', summary.total ?? rows.length),
+    metric('Eligible', summary.eligible ?? eligibleRows.length),
+    metric('Needs Review', summary.not_eligible ?? rows.filter((row) => !row.eligible).length),
+    metric('Selected', selectedTrackingKeys.size),
+    metric('Orders Pulled', state.orders_pulled ?? 0),
+    metric('Pages Pulled', state.pages_pulled ?? 0)
+  ].join('');
+  trackingRepairCount.textContent = rows.length;
+  trackingRepairExportButton.disabled = selectedTrackingKeys.size === 0;
+
+  trackingRepairTable.innerHTML = rows.length ? `
+    <div class="prep-toolbar">
+      <button id="selectEligibleTrackingButton" type="button">Select Eligible</button>
+      <button id="clearTrackingSelectionButton" type="button">Clear Selection</button>
+      <span>${selectedTrackingKeys.size} selected</span>
+    </div>
+    <div class="data-table tracking-table">
+      <div class="table-row table-head">
+        <span>Select</span><span>Order</span><span>Customer</span><span>Carrier</span><span>Tracking</span><span>Fulfilled</span><span>Status</span><span>Links</span>
+      </div>
+      ${rows.map((row) => `
+        <div class="table-row ${row.eligible ? '' : 'review-row'}">
+          <span><input class="tracking-row-select" type="checkbox" data-key="${escapeHtml(row.key)}"${selectedTrackingKeys.has(row.key) ? ' checked' : ''}${row.eligible ? '' : ' disabled'}></span>
+          <span><strong>${escapeHtml(row.order_name || '')}</strong><small>${escapeHtml(row.order_id || '')}</small></span>
+          <span>${escapeHtml(row.customer || '')}</span>
+          <span>${escapeHtml(row.carrier || '')}</span>
+          <span><strong>${escapeHtml(row.tracking_number || '')}</strong>${row.tracking_url ? `<small><a target="_blank" rel="noopener" href="${escapeHtml(row.tracking_url)}">Track</a></small>` : ''}</span>
+          <span>${escapeHtml(row.fulfilled_at || '')}</span>
+          <span>${row.eligible ? '<strong>Eligible</strong>' : escapeHtml((row.reasons || []).join(' '))}</span>
+          <span class="link-row"><a target="_blank" rel="noopener" href="${escapeHtml(row.veeqo_link || '#')}">Veeqo</a></span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<p class="empty">Scan shipped orders to find tracking corrections.</p>';
+  renderTrackingAudit(state.audit || { exports: [] });
+}
+
+function renderTrackingAudit(audit = trackingRepairState.audit || { exports: [] }) {
+  if (!trackingRepairAuditTable || !trackingRepairAuditCount) return;
+  const exports = audit.exports || [];
+  trackingRepairAuditCount.textContent = exports.length;
+  trackingRepairAuditTable.innerHTML = exports.length ? `
+    <div class="data-table tracking-audit-table">
+      <div class="table-row table-head">
+        <span>File</span><span>Status</span><span>Rows</span><span>Exported</span><span>Uploaded</span><span>Action</span>
+      </div>
+      ${exports.map((record) => `
+        <div class="table-row">
+          <span><strong>${escapeHtml(record.filename)}</strong><small>${escapeHtml(record.id)}</small></span>
+          <span>${escapeHtml(record.status || '')}</span>
+          <span>${(record.rows || []).length}</span>
+          <span>${record.exported_at ? new Date(record.exported_at).toLocaleString() : ''}</span>
+          <span>${record.uploaded_at ? new Date(record.uploaded_at).toLocaleString() : ''}</span>
+          <span>${record.status === 'uploaded' ? 'Uploaded' : `<button class="mark-tracking-uploaded" type="button" data-export-id="${escapeHtml(record.id)}">Mark Uploaded</button>`}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '<p class="empty">No tracking CSV exports yet.</p>';
 }
 
 function prepMatrixRows(rows) {
@@ -1378,6 +1456,99 @@ async function loadSalesReport(button = salesRefreshButton) {
   }
 }
 
+async function loadTrackingRepairAudit() {
+  const response = await handleAuthResponse(await fetch('/api/tracking-repair/audit'));
+  const audit = await response.json();
+  trackingRepairState = { ...trackingRepairState, audit };
+  renderTrackingRepair();
+}
+
+async function scanTrackingRepair(button = trackingRepairScanButton) {
+  setButtonProcessing(button, true, 'Scanning...');
+  try {
+    const params = new URLSearchParams();
+    if (channelInput.value.trim()) params.set('channel', channelInput.value.trim());
+    const response = await handleAuthResponse(await fetch(`/api/tracking-repair/scan?${params.toString()}`));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Tracking scan failed');
+    trackingRepairState = result;
+    selectedTrackingKeys.clear();
+    renderTrackingRepair(result);
+    showToast(`Tracking scan found ${result.summary?.eligible || 0} export-ready row${Number(result.summary?.eligible || 0) === 1 ? '' : 's'}.`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
+function selectedTrackingRows() {
+  return (trackingRepairState.rows || []).filter((row) => row.eligible && selectedTrackingKeys.has(row.key));
+}
+
+function filenameFromDisposition(disposition) {
+  const match = String(disposition || '').match(/filename="?([^"]+)"?/i);
+  return match ? match[1] : `tracking-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+}
+
+function downloadBlob(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+async function exportTrackingCsv(button = trackingRepairExportButton) {
+  const rows = selectedTrackingRows();
+  if (!rows.length) {
+    showToast('Select at least one eligible tracking row.');
+    return;
+  }
+
+  setButtonProcessing(button, true, 'Exporting...');
+  try {
+    const response = await handleAuthResponse(await fetch('/api/tracking-repair/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows })
+    }));
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || 'Tracking export failed');
+    }
+
+    const blob = await response.blob();
+    downloadBlob(blob, filenameFromDisposition(response.headers.get('Content-Disposition')));
+    selectedTrackingKeys.clear();
+    await loadTrackingRepairAudit();
+    showToast(`Exported ${rows.length} tracking row${rows.length === 1 ? '' : 's'}.`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
+async function markTrackingUploaded(exportId, button) {
+  setButtonProcessing(button, true, 'Saving...');
+  try {
+    const response = await handleAuthResponse(await fetch(`/api/tracking-repair/exports/${encodeURIComponent(exportId)}/uploaded`, { method: 'POST' }));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not mark export uploaded');
+    trackingRepairState = { ...trackingRepairState, audit: result.audit };
+    renderTrackingRepair();
+    showToast('Tracking export marked uploaded.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 function parseDataItems(value) {
   try {
     return JSON.parse(value || '[]');
@@ -1766,6 +1937,8 @@ demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
 channelScanButton.addEventListener('click', scanChannels);
 printPrepButton.addEventListener('click', printPrepSheet);
 salesRefreshButton?.addEventListener('click', () => loadSalesReport(salesRefreshButton));
+trackingRepairScanButton?.addEventListener('click', () => scanTrackingRepair(trackingRepairScanButton));
+trackingRepairExportButton?.addEventListener('click', () => exportTrackingCsv(trackingRepairExportButton));
 logoutButton.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';
@@ -1777,6 +1950,7 @@ document.querySelectorAll('.view-button').forEach((button) => {
     document.querySelectorAll('.view-button').forEach((item) => item.classList.toggle('active', item === button));
     document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active-view', view.id === button.dataset.view));
     if (button.dataset.view === 'salesView' && !salesReport) loadSalesReport(salesRefreshButton);
+    if (button.dataset.view === 'trackingRepairView' && !(trackingRepairState.audit?.exports || []).length) loadTrackingRepairAudit().catch((error) => showToast(error.message));
   });
 });
 document.addEventListener('click', (event) => {
@@ -1797,6 +1971,26 @@ document.addEventListener('click', (event) => {
   if (clearPrepSelectionButton) {
     selectedPrepKeys.clear();
     renderPrepView();
+    return;
+  }
+
+  const selectEligibleTrackingButton = event.target.closest('#selectEligibleTrackingButton');
+  if (selectEligibleTrackingButton) {
+    selectedTrackingKeys = new Set((trackingRepairState.rows || []).filter((row) => row.eligible).map((row) => row.key));
+    renderTrackingRepair();
+    return;
+  }
+
+  const clearTrackingSelectionButton = event.target.closest('#clearTrackingSelectionButton');
+  if (clearTrackingSelectionButton) {
+    selectedTrackingKeys.clear();
+    renderTrackingRepair();
+    return;
+  }
+
+  const markTrackingUploadedButton = event.target.closest('.mark-tracking-uploaded');
+  if (markTrackingUploadedButton) {
+    markTrackingUploaded(markTrackingUploadedButton.dataset.exportId, markTrackingUploadedButton);
     return;
   }
 
@@ -1863,6 +2057,14 @@ document.addEventListener('change', (event) => {
     if (prepRowSelect.checked) selectedPrepKeys.add(prepRowSelect.dataset.prepKey);
     else selectedPrepKeys.delete(prepRowSelect.dataset.prepKey);
     renderPrepView();
+    return;
+  }
+
+  const trackingRowSelect = event.target.closest('.tracking-row-select');
+  if (trackingRowSelect) {
+    if (trackingRowSelect.checked) selectedTrackingKeys.add(trackingRowSelect.dataset.key);
+    else selectedTrackingKeys.delete(trackingRowSelect.dataset.key);
+    renderTrackingRepair();
     return;
   }
 
