@@ -1,20 +1,23 @@
 import { createServer } from 'node:http';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { loadEnv } from './src/env.js';
 import { readLatestReport } from './src/report.js';
-import { applyPackageStateToReport, runReadOnlyAnalysis } from './src/analyzer.js';
+import { applyPackageStateToReport, orderHasPurchasedLabel, productSetupIssue, runReadOnlyAnalysis } from './src/analyzer.js';
 import { cancelBatchRecord, createBatchRecord, completeBatchRecord, listBatches, readBatchStore, reconcileActiveBatches, reopenCompletedBatchRecord, updateActiveBatchRecord, updateStoredBatchRecord } from './src/batch-store.js';
 import { requireEnv } from './src/env.js';
-import { getOrderChannelName, VeeqoClient } from './src/veeqo.js';
+import { chooseOperationalShippingRate, getOrderChannelName, getPrimaryAllocationId, getShippingRateCarrier, VeeqoClient } from './src/veeqo.js';
 import { buildPrepRows, packageSuggestionForRow, prepSummary, readPrepStore, setPackageOverride, setPreparedStatus } from './src/prep-store.js';
 import { analyzeOrderIssues } from './src/order-issues.js';
-import { packageOrdersForBatch } from './src/packaging-calculator.js';
+import { orderPackageInput, packageOrdersForBatch } from './src/packaging-calculator.js';
 import { readPackagingSettings, writePackagingSettings } from './src/packaging-store.js';
 import { buildProductSalesSnapshotReport, buildSalesReport } from './src/sales-report.js';
 import { shopifyProductSalesSnapshot } from './src/sales-snapshot.js';
 import { markTrackingExportUploaded, readTrackingAudit, recordTrackingExport, rowsToTrackingCsv, trackingRowsFromOrders } from './src/tracking-repair.js';
+import { normalizeOrderLineItems } from './src/clusterer.js';
+import { CBS_EVENT_ID, eventProfile, inferRecordEventId, isCbsOrder } from './src/event.js';
+import { createOperation, findOperationByIdempotencyKey, getOperation, readOperationStore, updateOperation } from './src/operation-store.js';
 
 loadEnv();
 
@@ -24,6 +27,9 @@ const port = Number.parseInt(process.env.PORT || '3000', 10);
 const sessions = new Map();
 const sessionTtlMs = 1000 * 60 * 60 * 12;
 const quickBatchChunkSize = 50;
+const freshnessWarningMs = 10 * 60 * 1000;
+const freshnessBlockMs = 30 * 60 * 1000;
+const runningOperations = new Set();
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -139,7 +145,7 @@ function loginHtml() {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Runway GMA Batch Optimizer Login</title>
+    <title>Fillement Login</title>
     <link rel="icon" type="image/png" href="/odi-icon.png">
     <link rel="apple-touch-icon" href="/odi-icon.png">
     <link rel="stylesheet" href="/style.css?v=20260513-3">
@@ -148,8 +154,8 @@ function loginHtml() {
     <main class="login-shell">
       <form id="loginForm" class="login-panel">
         <img class="app-logo login-logo" src="/odi-icon.png" alt="ODI">
-        <p class="eyebrow">Private Portal</p>
-        <h1>Runway GMA Batch Optimizer</h1>
+        <p class="eyebrow">CBS Deals Fulfillment</p>
+        <h1>Fillement</h1>
         <label for="usernameInput">Username</label>
         <input id="usernameInput" name="username" autocomplete="username" required>
         <label for="passwordInput">Password</label>
@@ -195,7 +201,7 @@ function findActionableBatch(report, subBatchId) {
   return (report?.actionable_batches || report?.clusters || []).find((batch) => batch.sub_batch_id === subBatchId || batch.signature === subBatchId);
 }
 
-function unavailableOrderIds(store = readBatchStore()) {
+function unavailableOrderIds(store = listBatches(CBS_EVENT_ID)) {
   return new Set([...(store.active || []), ...(store.completed || [])].flatMap((batch) => batch.order_ids || []));
 }
 
@@ -218,21 +224,36 @@ function chunkArray(values = [], size = quickBatchChunkSize) {
 function groupByPackageOrders(packageOrders = []) {
   const groups = new Map();
   for (const order of packageOrders) {
-    const key = order.package || 'Package Review';
+    const key = `${order.package || 'Package Review'}::${order.carrier || 'unknown'}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(order);
   }
   return groups;
 }
 
-async function pushPreparedPackages({ client, live, preparedOrders }) {
+async function mapWithConcurrency(values, concurrency, worker) {
+  const output = new Array(values.length);
+  let nextIndex = 0;
+  async function run() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      output[index] = await worker(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, run));
+  return output;
+}
+
+async function pushPreparedPackages({ client, live, preparedOrders, concurrency = 5 }) {
   if (!live) return;
-  for (const order of preparedOrders) {
+  await mapWithConcurrency(preparedOrders, concurrency, async (order) => {
     await client.updateAllocationPackage({
       allocationId: order.allocation_id,
       allocationPackage: order.allocation_package
     });
-  }
+    return order;
+  });
 }
 
 async function prepareBatchPackages({ client, live, packageOrders, settings = readPackagingSettings(), allowPartial = false }) {
@@ -248,6 +269,29 @@ async function prepareBatchPackages({ client, live, packageOrders, settings = re
   await pushPreparedPackages({ client, live, preparedOrders: result.ok });
 
   return allowPartial ? result : result.ok;
+}
+
+function reportAgeMs(report, now = Date.now()) {
+  const generated = new Date(report?.generated_at || 0).getTime();
+  return Number.isFinite(generated) ? Math.max(0, now - generated) : Number.POSITIVE_INFINITY;
+}
+
+function freshnessState(report) {
+  const ageMs = reportAgeMs(report);
+  return {
+    age_ms: ageMs,
+    stale: ageMs > freshnessWarningMs,
+    expired: ageMs > freshnessBlockMs,
+    warning_after_ms: freshnessWarningMs,
+    block_after_ms: freshnessBlockMs
+  };
+}
+
+function requireFreshCbsReport() {
+  const report = readLatestReport(CBS_EVENT_ID);
+  if (!report) throw new Error('Run Live Sync before starting CBS work.');
+  if (freshnessState(report).expired) throw new Error('CBS analysis is older than 30 minutes. Run Live Sync before changing Veeqo.');
+  return report;
 }
 
 function sourceBatchesFromRequest(body = {}, targetCount, unavailableIds) {
@@ -381,16 +425,277 @@ function quickPackageOrders(report, body, store = readBatchStore()) {
     .filter((order) => orderIdSet.has(order.order_id));
 }
 
+function operationKey(input) {
+  const stable = JSON.stringify({
+    event_id: CBS_EVENT_ID,
+    kind: input.kind,
+    order_count: input.order_count || null,
+    sub_batch_id: input.sub_batch_id || null,
+    order_ids: [...new Set(input.order_ids || [])].map(String).sort()
+  });
+  return createHash('sha256').update(stable).digest('hex');
+}
+
+function chunkIdempotencyKey({ orderIds, packageName, carrier, chunkIndex }) {
+  return createHash('sha256').update(JSON.stringify({
+    event_id: CBS_EVENT_ID,
+    order_ids: [...new Set(orderIds || [])].map(String).sort(),
+    package: packageName,
+    carrier,
+    chunk: chunkIndex
+  })).digest('hex');
+}
+
+async function revalidateCbsOrders(client, orderIds) {
+  const unavailable = unavailableOrderIds();
+  const results = await mapWithConcurrency(orderIds, 5, async (orderId) => {
+    try {
+      const order = await client.getOrder(orderId);
+      if (!isCbsOrder(order)) return { ok: false, order_id: orderId, reason: 'Order no longer matches the CBS prefix.' };
+      const expectedStatus = String(process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment').toLowerCase();
+      const currentStatus = String(order?.status || '').toLowerCase();
+      if (currentStatus && currentStatus !== expectedStatus) {
+        return { ok: false, order_id: orderId, order_number: order.number, reason: `Order status changed to ${order.status}.` };
+      }
+      if (unavailable.has(order.id) || unavailable.has(orderId)) return { ok: false, order_id: orderId, reason: 'Order is already active or completed.' };
+      if (orderHasPurchasedLabel(order)) return { ok: false, order_id: orderId, reason: 'Shipping label is already purchased.' };
+      const operationalIssue = analyzeOrderIssues(order, issueConfig());
+      const setupIssue = productSetupIssue(order, issueConfig());
+      const blockingIssues = [operationalIssue, setupIssue].filter((issue) => issue?.hold);
+      if (blockingIssues.length) {
+        return {
+          ok: false,
+          order_id: orderId,
+          order_number: order.number,
+          reason: blockingIssues.flatMap((issue) => issue.issues || []).map((item) => item.detail).join('; ')
+        };
+      }
+      const items = normalizeOrderLineItems(order);
+      if (!items.length) return { ok: false, order_id: orderId, order_number: order.number, reason: 'No usable line items.' };
+      return {
+        ok: true,
+        order,
+        items,
+        package_order: orderPackageInput(order, items)
+      };
+    } catch (error) {
+      return { ok: false, order_id: orderId, reason: error.message || 'Unable to revalidate order.' };
+    }
+  });
+  return {
+    ok: results.filter((result) => result.ok),
+    failed: results.filter((result) => !result.ok)
+  };
+}
+
+async function updatePackagesWithResults(client, preparedOrders) {
+  const results = await mapWithConcurrency(preparedOrders, 5, async (order) => {
+    try {
+      await client.updateAllocationPackage({
+        allocationId: order.allocation_id,
+        allocationPackage: order.allocation_package
+      });
+      return { ok: true, order };
+    } catch (error) {
+      return { ok: false, order_id: order.order_id, order_number: order.order_number, reason: error.message || 'Package update failed.' };
+    }
+  });
+  return {
+    ok: results.filter((result) => result.ok).map((result) => result.order),
+    failed: results.filter((result) => !result.ok)
+  };
+}
+
+async function refreshPreparedCarriers(client, preparedOrders) {
+  return mapWithConcurrency(preparedOrders, 5, async (order) => {
+    try {
+      const rates = await client.getShippingRates(order.allocation_id);
+      const rate = chooseOperationalShippingRate(rates);
+      if (!rate) throw new Error('No operational shipping rate returned.');
+      const carrier = getShippingRateCarrier(rate);
+      return {
+        ...order,
+        carrier: carrier.carrier,
+        carrier_label: carrier.carrier_label,
+        carrier_source: rate.title || rate.name || rate.service_name || carrier.carrier_source
+      };
+    } catch {
+      return {
+        ...order,
+        carrier: 'carrier-refresh-needed',
+        carrier_label: 'Carrier Refresh Needed',
+        carrier_source: 'No rate after package update'
+      };
+    }
+  });
+}
+
+async function createOperationBatches(client, operation, preparedOrders) {
+  const source = operation.input;
+  const groups = groupByPackageOrders(preparedOrders);
+  const groupChunks = [...groups.entries()].flatMap(([groupKey, orders]) => {
+    const separator = groupKey.lastIndexOf('::');
+    const packageName = separator === -1 ? groupKey : groupKey.slice(0, separator);
+    const carrier = separator === -1 ? 'unknown' : groupKey.slice(separator + 2);
+    return chunkArray(orders, quickBatchChunkSize).map((chunk) => ({ packageName, carrier, chunk }));
+  });
+  const created = [];
+
+  for (let index = 0; index < groupChunks.length; index += 1) {
+    const { packageName, carrier, chunk } = groupChunks[index];
+    const part = index + 1;
+    const carrierLabel = chunk[0]?.carrier_label || carrier;
+    const chunkKey = chunkIdempotencyKey({
+      orderIds: chunk.map((order) => order.order_id), packageName, carrier, chunkIndex: part
+    });
+    const tagName = `CBS-BATCH-${tagSafe(carrier)}-${part}-${chunkKey.slice(0, 12)}`;
+    const tag = await client.findOrCreateTag({ name: tagName, colour: '#f5df9e' });
+    await client.tagOrders({ orderIds: chunk.map((order) => order.order_id), tagIds: [tag.id] });
+    const itemMap = new Map();
+    for (const prepared of chunk) {
+      const validated = source.validated_items?.[String(prepared.order_id)] || [];
+      for (const item of validated) {
+        const key = item.sku;
+        if (!itemMap.has(key)) itemMap.set(key, { ...item, quantity: 0 });
+        itemMap.get(key).quantity += Number(item.quantity || 0);
+      }
+    }
+    const batch = createBatchRecord({
+      event_id: CBS_EVENT_ID,
+      operation_id: operation.id,
+      idempotency_key: chunkKey,
+      mode: 'live',
+      status: 'active',
+      sub_batch_id: `${source.sub_batch_id || `COUNT-${source.order_count}`}::${packageName}::${carrier}::${part}::${operation.id}`,
+      signature: source.signature || source.sub_batch_id || `COUNT-${source.order_count}`,
+      carrier,
+      carrier_label: carrierLabel,
+      label: `${source.label || 'CBS Batch'} · ${carrierLabel}`,
+      category: source.category || 'mixed',
+      package: packageName,
+      order_count: chunk.length,
+      total_revenue: 0,
+      order_ids: chunk.map((order) => order.order_id),
+      order_numbers: chunk.map((order) => order.order_number).filter(Boolean),
+      items: [...itemMap.values()],
+      package_orders: chunk,
+      tag_name: tagName,
+      tag_id: tag.id,
+      cleanup_status: 'pending'
+    });
+    created.push(batch);
+    updateOperation(operation.id, {
+      stage: 'creating_tags',
+      completed_orders: created.reduce((sum, record) => sum + record.order_count, 0),
+      batch_ids: created.map((record) => record.id)
+    });
+  }
+  return created;
+}
+
+async function executeBatchOperation(operationId) {
+  if (runningOperations.has(operationId)) return;
+  runningOperations.add(operationId);
+  try {
+    let operation = getOperation(operationId);
+    if (!operation || operation.status === 'completed') return;
+    requireFreshCbsReport();
+    updateOperation(operationId, { status: 'running', stage: 'revalidating', started_at: new Date().toISOString() });
+    const client = makeVeeqoClient();
+    const validation = await revalidateCbsOrders(client, operation.input.order_ids || []);
+    const validatedItems = Object.fromEntries(validation.ok.map((result) => [String(result.order.id), result.items]));
+    updateOperation(operationId, {
+      total_orders: (operation.input.order_ids || []).length,
+      failed_orders: validation.failed.length,
+      failures: validation.failed,
+      stage: 'calculating_packages'
+    });
+    const packageResult = packageOrdersForBatch(validation.ok.map((result) => result.package_order), readPackagingSettings());
+    const failures = [...validation.failed, ...packageResult.failed.map((failure) => ({
+      order_id: failure.order_id,
+      order_number: failure.order_number,
+      reason: failure.reason
+    }))];
+    if (!packageResult.ok.length) throw new Error(failures[0]?.reason || 'No CBS orders passed package review.');
+    updateOperation(operationId, { stage: 'updating_packages', failed_orders: failures.length, failures });
+    const packageUpdates = await updatePackagesWithResults(client, packageResult.ok);
+    failures.push(...packageUpdates.failed);
+    if (!packageUpdates.ok.length) throw new Error(failures[0]?.reason || 'No Veeqo package updates succeeded.');
+    updateOperation(operationId, { stage: 'refreshing_carriers', failed_orders: failures.length, failures });
+    const prepared = await refreshPreparedCarriers(client, packageUpdates.ok);
+    operation = updateOperation(operationId, {
+      stage: 'creating_tags',
+      input: { ...operation.input, validated_items: validatedItems }
+    });
+    const batches = await createOperationBatches(client, operation, prepared);
+    updateOperation(operationId, {
+      status: 'completed',
+      stage: 'completed',
+      completed_orders: prepared.length,
+      failed_orders: failures.length,
+      failures,
+      batch_ids: batches.map((batch) => batch.id),
+      completed_at: new Date().toISOString()
+    });
+  } catch (error) {
+    updateOperation(operationId, {
+      status: 'failed',
+      stage: 'failed',
+      error: error.message || 'Batch operation failed.',
+      failed_at: new Date().toISOString()
+    });
+  } finally {
+    runningOperations.delete(operationId);
+  }
+}
+
 function findStoredBatch(batchId) {
-  const store = readBatchStore();
+  const store = listBatches(CBS_EVENT_ID);
   return [...store.active, ...store.completed, ...store.canceled].find((batch) => batch.id === batchId);
 }
 
 function latestPrepPayload() {
-  const report = readLatestReport() || { clusters: [] };
+  const report = readLatestReport(CBS_EVENT_ID) || { event_id: CBS_EVENT_ID, clusters: [] };
   const store = readPrepStore();
   const rows = buildPrepRows(report.clusters || [], store);
   return { state: store, rows, summary: prepSummary(rows) };
+}
+
+function queueBatchOperation(kind, body = {}) {
+  const report = requireFreshCbsReport();
+  let input;
+  if (kind === 'sub_batch') {
+    const subBatch = findActionableBatch(report, body.sub_batch_id);
+    if (!subBatch) throw new Error('Sub-batch not found in the fresh CBS analysis.');
+    input = {
+      kind,
+      sub_batch_id: subBatch.sub_batch_id,
+      signature: subBatch.signature,
+      label: subBatch.parent_label || subBatch.label,
+      category: subBatch.category,
+      order_ids: subBatch.order_ids || []
+    };
+  } else {
+    const orderCount = Number(body.order_count || 0);
+    if (![1, 2, 3].includes(orderCount)) throw new Error('Order count must be 1, 2, or 3.');
+    const unavailableIds = unavailableOrderIds();
+    const source = sourceBatchesFromReport(report, orderCount, unavailableIds);
+    if (!source.orderIds.length) throw new Error(`No current ${orderCount}-count CBS orders are available.`);
+    input = {
+      kind,
+      order_count: orderCount,
+      sub_batch_id: `COUNT-${orderCount}`,
+      signature: `COUNT-${orderCount}`,
+      label: `${orderCount}-count CBS consolidation`,
+      category: 'quick_count',
+      order_ids: source.orderIds
+    };
+  }
+  const idempotencyKey = operationKey(input);
+  let operation = findOperationByIdempotencyKey(idempotencyKey);
+  if (!operation) operation = createOperation({ idempotencyKey, eventId: CBS_EVENT_ID, kind, input });
+  if (!['completed', 'running'].includes(operation.status)) setImmediate(() => executeBatchOperation(operation.id));
+  return operation;
 }
 
 function veeqoUrlForBatch(batch) {
@@ -492,6 +797,8 @@ const server = createServer(async (request, response) => {
       const config = portalConfig();
       sendJson(response, 200, {
         user: session.user,
+        event_id: CBS_EVENT_ID,
+        event_label: eventProfile(CBS_EVENT_ID).label,
         auth_enabled: authEnabled(),
         default_channel_filter: process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
         analyze_status: process.env.VEEQO_ANALYZE_STATUS || process.env.VEEQO_API_CHECK_STATUS || 'awaiting_fulfillment',
@@ -505,18 +812,27 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/latest-analysis') {
-      sendJson(response, 200, applyPackageStateToReport(readLatestReport()) || { empty: true });
+      const report = applyPackageStateToReport(readLatestReport(CBS_EVENT_ID));
+      sendJson(response, 200, report ? { ...report, freshness: freshnessState(report) } : { empty: true, event_id: CBS_EVENT_ID });
       return;
     }
 
     if (request.method === 'GET' && url.pathname === '/api/batches') {
-      const report = applyPackageStateToReport(readLatestReport());
-      sendJson(response, 200, report ? reconcileActiveBatches(report) : listBatches());
+      const report = applyPackageStateToReport(readLatestReport(CBS_EVENT_ID));
+      if (!report) {
+        sendJson(response, 200, listBatches(CBS_EVENT_ID));
+        return;
+      }
+      const reconciled = reconcileActiveBatches(report);
+      sendJson(response, 200, Object.fromEntries(Object.entries(reconciled).map(([bucket, rows]) => [
+        bucket,
+        (rows || []).filter((record) => inferRecordEventId(record) === CBS_EVENT_ID)
+      ])));
       return;
     }
 
     if (request.method === 'GET' && url.pathname === '/api/batches/completed') {
-      sendJson(response, 200, { completed: readBatchStore().completed });
+      sendJson(response, 200, { completed: listBatches(CBS_EVENT_ID).completed });
       return;
     }
 
@@ -526,7 +842,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/tracking-repair/audit') {
-      sendJson(response, 200, readTrackingAudit());
+      sendJson(response, 200, readTrackingAudit(CBS_EVENT_ID));
       return;
     }
 
@@ -536,7 +852,7 @@ const server = createServer(async (request, response) => {
       const maxPages = Number.parseInt(process.env.VEEQO_TRACKING_REPAIR_MAX_PAGES || '20', 10);
       const result = await makeVeeqoClient().listAllOrders({ status, pageSize, maxPages, maxMs: 20000 });
       const rows = trackingRowsFromOrders(result.orders, {
-        channelFilter: url.searchParams.get('channel') || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
+        eventId: CBS_EVENT_ID,
         config: issueConfig()
       });
       sendJson(response, 200, {
@@ -549,7 +865,7 @@ const server = createServer(async (request, response) => {
           eligible: rows.filter((row) => row.eligible).length,
           not_eligible: rows.filter((row) => !row.eligible).length
         },
-        audit: readTrackingAudit()
+        audit: readTrackingAudit(CBS_EVENT_ID)
       });
       return;
     }
@@ -562,7 +878,7 @@ const server = createServer(async (request, response) => {
         return;
       }
       const filename = `tracking-corrections-${new Date().toISOString().slice(0, 10)}-${Date.now()}.csv`;
-      recordTrackingExport({ rows, filename });
+      recordTrackingExport({ rows, filename, eventId: CBS_EVENT_ID });
       sendCsv(response, filename, rowsToTrackingCsv(rows));
       return;
     }
@@ -570,12 +886,17 @@ const server = createServer(async (request, response) => {
     const trackingUploadedMatch = url.pathname.match(/^\/api\/tracking-repair\/exports\/([^/]+)\/uploaded$/);
     if (request.method === 'POST' && trackingUploadedMatch) {
       const exportId = decodeURIComponent(trackingUploadedMatch[1]);
+      const scopedExport = readTrackingAudit(CBS_EVENT_ID).exports.find((record) => record.id === exportId);
+      if (!scopedExport) {
+        sendJson(response, 404, { error: 'CBS tracking export not found.' });
+        return;
+      }
       const record = markTrackingExportUploaded(exportId);
       if (!record) {
         sendJson(response, 404, { error: 'Tracking export not found.' });
         return;
       }
-      sendJson(response, 200, { export: record, audit: readTrackingAudit() });
+      sendJson(response, 200, { export: record, audit: readTrackingAudit(CBS_EVENT_ID) });
       return;
     }
 
@@ -612,23 +933,14 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/sales-report') {
-      const source = url.searchParams.get('source') || process.env.SALES_REPORT_SOURCE || 'shopify_snapshot';
-      if (source !== 'veeqo') {
-        sendJson(response, 200, buildProductSalesSnapshotReport({
-          productSales: shopifyProductSalesSnapshot,
-          dataSource: 'Shopify product report snapshot'
-        }));
-        return;
-      }
-
       const pageSize = Number.parseInt(process.env.VEEQO_SALES_PAGE_SIZE || process.env.VEEQO_ANALYZE_PAGE_SIZE || '100', 10);
       const maxPages = Number.parseInt(url.searchParams.get('pages') || process.env.VEEQO_SALES_MAX_PAGES || '5', 10);
       const maxMs = Number.parseInt(process.env.VEEQO_SALES_MAX_MS || '20000', 10);
       const result = await makeVeeqoClient().listAllOrders({ status: '', pageSize, maxPages, maxMs });
       sendJson(response, 200, buildSalesReport({
         orders: result.orders,
-        channelFilter: url.searchParams.get('channel') || process.env.VEEQO_CHANNEL_FILTER || 'Runway by Christian Siriano',
-        completedOrderIds: completedOrderIds(),
+        eventId: CBS_EVENT_ID,
+        completedOrderIds: completedOrderIds(listBatches(CBS_EVENT_ID)),
         dataSource: `Veeqo order history (${result.pagesPulled || 0} page${result.pagesPulled === 1 ? '' : 's'})`,
         totalCount: result.totalCount,
         totalPages: result.totalPages,
@@ -667,8 +979,8 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'POST' && url.pathname === '/api/analyze') {
       const { payload } = await runReadOnlyAnalysis({
+        eventId: CBS_EVENT_ID,
         demo: url.searchParams.get('demo') === '1',
-        channel: url.searchParams.get('channel') || undefined,
         refreshCarriers: url.searchParams.get('refresh_carriers') === '1'
       });
       sendJson(response, 200, payload);
@@ -699,6 +1011,7 @@ const server = createServer(async (request, response) => {
         return;
       }
       setPreparedStatus({
+        eventId: CBS_EVENT_ID,
         signature: body.signature,
         label: body.label || '',
         packageName: body.package,
@@ -708,8 +1021,68 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/events/cbs_deals/tag-orders') {
+      const report = requireFreshCbsReport();
+      const rows = Array.isArray(report.event_orders) ? report.event_orders : [];
+      const profile = eventProfile(CBS_EVENT_ID);
+      const alreadyTagged = rows.filter((order) => (order.tags || []).some((tag) => String(tag).toUpperCase() === profile.persistent_tag));
+      const pending = rows.filter((order) => !alreadyTagged.includes(order));
+      const client = makeVeeqoClient();
+      const tag = await client.findOrCreateTag({ name: profile.persistent_tag, colour: '#6ed7c7' });
+      const failures = [];
+      let tagged = 0;
+      for (const chunk of chunkArray(pending, quickBatchChunkSize)) {
+        try {
+          await client.tagOrders({ orderIds: chunk.map((order) => order.id), tagIds: [tag.id] });
+          tagged += chunk.length;
+        } catch (error) {
+          failures.push(...chunk.map((order) => ({ order_id: order.id, order_number: order.number, reason: error.message || 'Tagging failed.' })));
+        }
+      }
+      sendJson(response, failures.length ? 207 : 200, {
+        event_id: CBS_EVENT_ID,
+        tag_name: profile.persistent_tag,
+        matched: rows.length,
+        already_tagged: alreadyTagged.length,
+        tagged,
+        failed: failures.length,
+        failures
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/batch-operations') {
+      const body = await readJsonBody(request);
+      const operation = queueBatchOperation(body.kind === 'count' ? 'count' : 'sub_batch', body);
+      sendJson(response, 202, { operation });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/batch-operations') {
+      const operations = readOperationStore().operations
+        .filter((operation) => operation.event_id === CBS_EVENT_ID)
+        .slice(0, 20);
+      sendJson(response, 200, { operations });
+      return;
+    }
+
+    const operationMatch = url.pathname.match(/^\/api\/batch-operations\/([^/]+)$/);
+    if (request.method === 'GET' && operationMatch) {
+      const operation = getOperation(decodeURIComponent(operationMatch[1]));
+      if (!operation || operation.event_id !== CBS_EVENT_ID) {
+        sendJson(response, 404, { error: 'Batch operation not found.' });
+        return;
+      }
+      sendJson(response, 200, { operation });
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/batches') {
       const body = await readJsonBody(request);
+      const operation = queueBatchOperation('sub_batch', body);
+      sendJson(response, 202, { operation });
+      return;
+      /* Legacy implementation retained below for rollback reference. */
       const report = readLatestReport();
       const subBatch = findActionableBatch(report, body.sub_batch_id);
       if (!subBatch) {
@@ -775,8 +1148,12 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'POST' && url.pathname === '/api/batches/by-count') {
       const body = await readJsonBody(request);
+      const operation = queueBatchOperation('count', body);
+      sendJson(response, 202, { operation });
+      return;
+      /* Legacy implementation retained below for rollback reference. */
       const report = readLatestReport();
-      const store = readBatchStore();
+      const store = listBatches(CBS_EVENT_ID);
       const live = report?.data_source !== 'demo test data';
       const client = live ? makeVeeqoClient() : null;
       const requestedPackageOrders = quickPackageOrders(report, body, store);
@@ -842,7 +1219,7 @@ const server = createServer(async (request, response) => {
     const completeMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/complete$/);
     if (request.method === 'POST' && completeMatch) {
       const batchId = decodeURIComponent(completeMatch[1]);
-      const store = readBatchStore();
+      const store = listBatches(CBS_EVENT_ID);
       const active = store.active.find((batch) => batch.id === batchId);
       if (!active) {
         sendJson(response, 404, { error: 'Active batch not found.' });
@@ -851,21 +1228,16 @@ const server = createServer(async (request, response) => {
 
       let cleanupStatus = active.cleanup_status;
       if (active.mode === 'live' && active.tag_id) {
+        requireFreshCbsReport();
         const client = makeVeeqoClient();
         await client.untagOrders({ orderIds: active.order_ids, tagIds: [active.tag_id] });
         cleanupStatus = 'removed';
       }
 
       const completedAt = new Date().toISOString();
-      const pauseSeconds = elapsedPauseSeconds(active, new Date(completedAt));
-      const durationSeconds = Math.max(1, Math.round((new Date(completedAt) - new Date(active.started_at)) / 1000) - pauseSeconds);
       const completed = completeBatchRecord(batchId, {
         status: 'completed',
         completed_at: completedAt,
-        duration_seconds: durationSeconds,
-        pause_seconds: pauseSeconds,
-        paused_at: null,
-        orders_per_minute: active.order_count / (durationSeconds / 60),
         cleanup_status: cleanupStatus
       });
 
@@ -876,7 +1248,7 @@ const server = createServer(async (request, response) => {
     const reopenMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/reopen$/);
     if (request.method === 'POST' && reopenMatch) {
       const batchId = decodeURIComponent(reopenMatch[1]);
-      const store = readBatchStore();
+      const store = listBatches(CBS_EVENT_ID);
       const completed = store.completed.find((batch) => batch.id === batchId || batch.tag_name === batchId || String(batch.tag_id || '') === batchId);
       if (!completed) {
         sendJson(response, 404, { error: 'Completed batch not found.' });
@@ -885,14 +1257,14 @@ const server = createServer(async (request, response) => {
 
       let cleanupStatus = completed.cleanup_status;
       if (completed.mode === 'live' && completed.tag_id) {
+        requireFreshCbsReport();
         const client = makeVeeqoClient();
         await client.tagOrders({ orderIds: completed.order_ids, tagIds: [completed.tag_id] });
         cleanupStatus = 'restored';
       }
 
       const reopened = reopenCompletedBatchRecord(batchId, {
-        status: 'paused',
-        paused_at: new Date().toISOString(),
+        status: 'parked',
         cleanup_status: cleanupStatus
       });
       sendJson(response, 200, { batch: reopened });
@@ -902,6 +1274,10 @@ const server = createServer(async (request, response) => {
     const labelCarrierMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/label-carrier$/);
     if (request.method === 'PATCH' && labelCarrierMatch) {
       const batchId = decodeURIComponent(labelCarrierMatch[1]);
+      if (!findStoredBatch(batchId)) {
+        sendJson(response, 404, { error: 'CBS batch not found.' });
+        return;
+      }
       const body = await readJsonBody(request);
       const carrier = String(body.carrier || '').toUpperCase();
       if (carrier && !['USPS', 'UPS'].includes(carrier)) {
@@ -917,44 +1293,42 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    const pauseMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/pause$/);
+    const pauseMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/(?:pause|park)$/);
     if (request.method === 'POST' && pauseMatch) {
       const batchId = decodeURIComponent(pauseMatch[1]);
-      const active = readBatchStore().active.find((batch) => batch.id === batchId);
+      const active = listBatches(CBS_EVENT_ID).active.find((batch) => batch.id === batchId);
       if (!active) {
         sendJson(response, 404, { error: 'Active batch not found.' });
         return;
       }
 
-      if (active.status === 'paused') {
+      if (active.status === 'parked') {
         sendJson(response, 200, { batch: active });
         return;
       }
 
       const paused = updateActiveBatchRecord(batchId, {
-        status: 'paused',
-        paused_at: new Date().toISOString(),
-        pause_seconds: Number(active.pause_seconds || 0)
+        status: 'parked',
+        parked_at: new Date().toISOString()
       });
 
       sendJson(response, 200, { batch: paused });
       return;
     }
 
-    const resumeMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/resume$/);
+    const resumeMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/(?:resume|activate)$/);
     if (request.method === 'POST' && resumeMatch) {
       const batchId = decodeURIComponent(resumeMatch[1]);
-      const active = readBatchStore().active.find((batch) => batch.id === batchId);
+      const active = listBatches(CBS_EVENT_ID).active.find((batch) => batch.id === batchId);
       if (!active) {
         sendJson(response, 404, { error: 'Active batch not found.' });
         return;
       }
 
-      const pauseSeconds = elapsedPauseSeconds(active);
       const resumed = updateActiveBatchRecord(batchId, {
         status: 'active',
-        paused_at: null,
-        pause_seconds: pauseSeconds
+        parked_at: null,
+        activated_at: new Date().toISOString()
       });
 
       sendJson(response, 200, { batch: resumed });
@@ -964,7 +1338,7 @@ const server = createServer(async (request, response) => {
     const cancelMatch = url.pathname.match(/^\/api\/batches\/([^/]+)\/cancel$/);
     if (request.method === 'POST' && cancelMatch) {
       const batchId = decodeURIComponent(cancelMatch[1]);
-      const store = readBatchStore();
+      const store = listBatches(CBS_EVENT_ID);
       const active = store.active.find((batch) => batch.id === batchId);
       if (!active) {
         sendJson(response, 404, { error: 'Active batch not found.' });
@@ -973,6 +1347,7 @@ const server = createServer(async (request, response) => {
 
       let cleanupStatus = active.cleanup_status;
       if (active.mode === 'live' && active.tag_id) {
+        requireFreshCbsReport();
         const client = makeVeeqoClient();
         await client.untagOrders({ orderIds: active.order_ids, tagIds: [active.tag_id] });
         cleanupStatus = 'removed';
@@ -1016,4 +1391,9 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`Batch Optimizer report available at http://localhost:${port}`);
+  for (const operation of readOperationStore().operations || []) {
+    if (operation.event_id !== CBS_EVENT_ID || !['queued', 'running'].includes(operation.status)) continue;
+    updateOperation(operation.id, { status: 'queued', stage: 'queued', recovered_at: new Date().toISOString() });
+    setImmediate(() => executeBatchOperation(operation.id));
+  }
 });

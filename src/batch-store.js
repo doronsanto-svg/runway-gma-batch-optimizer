@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { CBS_EVENT_ID, GMA_EVENT_ID, inferRecordEventId } from './event.js';
 
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(process.cwd(), 'data');
 const storePath = resolve(dataDir, 'batches.json');
@@ -10,7 +11,14 @@ function emptyStore() {
 
 export function readBatchStore() {
   if (!existsSync(storePath)) return emptyStore();
-  return { ...emptyStore(), ...JSON.parse(readFileSync(storePath, 'utf8')) };
+  const store = { ...emptyStore(), ...JSON.parse(readFileSync(storePath, 'utf8')) };
+  for (const bucket of ['active', 'completed', 'canceled']) {
+    store[bucket] = (store[bucket] || []).map((record) => ({
+      ...record,
+      event_id: inferRecordEventId(record)
+    }));
+  }
+  return store;
 }
 
 export function writeBatchStore(store) {
@@ -18,17 +26,24 @@ export function writeBatchStore(store) {
   writeFileSync(storePath, JSON.stringify(store, null, 2));
 }
 
-export function listBatches() {
-  return readBatchStore();
+export function listBatches(eventId = null) {
+  const store = readBatchStore();
+  if (!eventId) return store;
+  return Object.fromEntries(Object.entries(store).map(([bucket, rows]) => [
+    bucket,
+    (rows || []).filter((record) => inferRecordEventId(record) === eventId)
+  ]));
 }
 
 export function reconcileActiveBatches(report) {
   const store = readBatchStore();
+  const eventId = report?.event_id || null;
   const actionable = report?.actionable_batches || report?.clusters || [];
   const bySubBatchId = new Map(actionable.map((batch) => [batch.sub_batch_id || batch.signature, batch]));
   let changed = false;
 
   store.active = store.active.map((batch) => {
+    if (eventId && inferRecordEventId(batch) !== eventId) return batch;
     const latest = bySubBatchId.get(batch.sub_batch_id);
     if (!latest) return batch;
 
@@ -64,12 +79,14 @@ export function reconcileActiveBatches(report) {
 
 export function createBatchRecord(record) {
   const store = readBatchStore();
-  const existing = store.active.find((batch) => batch.sub_batch_id === record.sub_batch_id);
+  const eventId = record.event_id || GMA_EVENT_ID;
+  const existing = store.active.find((batch) => batch.sub_batch_id === record.sub_batch_id && inferRecordEventId(batch) === eventId);
   if (existing) return existing;
 
   const batch = {
     id: `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     created_at: new Date().toISOString(),
+    event_id: eventId,
     ...record
   };
 
@@ -115,8 +132,7 @@ export function reopenCompletedBatchRecord(identifier, updates = {}) {
   const reopened = {
     ...rest,
     ...updates,
-    status: updates.status || 'paused',
-    paused_at: updates.paused_at || new Date().toISOString(),
+    status: updates.status || (inferRecordEventId(completed) === CBS_EVENT_ID ? 'parked' : 'paused'),
     reopened_at: updates.reopened_at || new Date().toISOString(),
     reopened_from_completed_at: completedAt || null,
     reopened_duration_seconds: durationSeconds || null,

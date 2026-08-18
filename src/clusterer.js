@@ -18,6 +18,16 @@ export function normalizeOrderLineItems(order) {
     if (!titlesBySku.has(sku)) titlesBySku.set(sku, getLineItemTitle(lineItem));
   }
 
+  const bundleQuantity = quantitiesBySku.get('PL-RW-GAGBK3-R') || 0;
+  if (bundleQuantity > 0) {
+    const bundledSkus = ['PL-RW-FL30-R', 'PL-RW-SL30-R', 'PL-RW-FT72-R'];
+    for (const sku of bundledSkus) {
+      const remaining = (quantitiesBySku.get(sku) || 0) - bundleQuantity;
+      if (remaining > 0) quantitiesBySku.set(sku, remaining);
+      else quantitiesBySku.delete(sku);
+    }
+  }
+
   return [...quantitiesBySku.entries()]
     .sort(([skuA], [skuB]) => skuA.localeCompare(skuB))
     .map(([sku, quantity]) => ({

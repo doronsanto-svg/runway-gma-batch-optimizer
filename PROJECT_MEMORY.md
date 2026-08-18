@@ -1,4 +1,20 @@
-# Runway GMA Batch Optimizer Project Memory
+# Fillement Project Memory
+
+## CBS Deals Refinement - 2026-08-17
+
+- Active workspace: `cbs_deals`, displayed as **CBS Deals Fulfillment**.
+- Membership is exclusively the first three normalized order-number characters: `CBS`. Leading punctuation and case are normalized; channel never controls CBS inclusion.
+- CBS reports, batches, prepared status, sales, tracking audits, operations, and history are event-scoped. Existing GMA records stay stored but do not contribute to CBS views or actions.
+- Live Sync is read-only. The persistent `CBS-DEALS` Veeqo tag is applied only by the explicit dashboard action.
+- Batch starts are persisted operations with visible stages, restart recovery, package updates, final carrier refresh, per-order failures, chunk-level idempotency, and a 50-order tag maximum.
+- Unknown products are held in Product Setup Review. CBS bundle `PL-RW-GAGBK3-R` expands to First Look, Spotlight, and Finishing Touch without double-counting combined parent/component payloads.
+- Timer, forecast, station, and team metrics were removed. Operational statuses are Active and Parked; Park does not track elapsed time.
+- Cached data displays immediately. Reports warn after 10 minutes and Veeqo writes are blocked after 30 minutes until Live Sync succeeds.
+- Primary navigation is Dashboard, Prep, Issues, and History. Packaging, Sales, Tracking Repair, and Demo are Utilities; Sales is lazy-loaded and Demo is hidden in production.
+- Verification: 53/53 automated tests passed. Browser checks passed at desktop, 903px, and 390x844 with no page-level horizontal overflow; 903px header was 82px and phone Quick Count operations began within the first viewport.
+- Live read-only CBS sync on 2026-08-17 pulled zero CBS orders, expected before launch. Next required validation is 1–3 real CBS orders, then one 50-order rehearsal.
+
+The material below is retained as historical GMA context and is not the current CBS operating contract.
 
 Last updated: 2026-05-11
 

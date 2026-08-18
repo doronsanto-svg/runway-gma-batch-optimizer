@@ -61,6 +61,16 @@ export const GMA_SKUS = {
       { name: 'All Access', quantity: 1 },
       { name: 'Finishing Touch', quantity: 1 }
     ]
+  },
+  'PL-RW-GAGBK3-R': {
+    name: 'Grip & Glow Backstage Kit',
+    type: 'kit_small',
+    pieces: 3,
+    components: [
+      { name: 'First Look', quantity: 1 },
+      { name: 'Spotlight', quantity: 1 },
+      { name: 'Finishing Touch', quantity: 1 }
+    ]
   }
 };
 

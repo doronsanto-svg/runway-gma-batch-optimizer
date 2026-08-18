@@ -3,37 +3,55 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Runway GMA Batch Optimizer</title>
+    <title>Fillement | CBS Deals Fulfillment</title>
     <link rel="icon" type="image/png" href="/odi-icon.png">
     <link rel="apple-touch-icon" href="/odi-icon.png">
-    <link rel="stylesheet" href="/style.css?v=20260604-1">
+    <link rel="stylesheet" href="/style.css?v=20260817-cbs1">
   </head>
   <body>
     <header class="topbar">
       <div class="brand-lockup">
         <img class="app-logo" src="/odi-icon.png" alt="ODI">
         <div>
-          <p class="eyebrow">Veeqo Read-Only Report</p>
-          <h1>Runway GMA Batch Optimizer</h1>
+          <p class="eyebrow">CBS Deals Fulfillment</p>
+          <h1>Fillement</h1>
         </div>
       </div>
       <div class="actions">
         <button class="view-button active" type="button" data-view="dashboardView">Dashboard</button>
         <button class="view-button" type="button" data-view="prepView">Prep</button>
-        <button class="view-button" type="button" data-view="salesView">Sales</button>
-        <button class="view-button" type="button" data-view="trackingRepairView">Tracking Repair</button>
         <button class="view-button" type="button" data-view="issuesView">Issues</button>
         <button class="view-button" type="button" data-view="historyView">History</button>
-        <button class="view-button" type="button" data-view="settingsView">Settings</button>
-        <button id="demoButton" type="button">Demo Data</button>
-        <button id="refreshButton" type="button">Live Re-analyze</button>
-        <button id="carrierRefreshButton" type="button">Refresh Carriers</button>
+        <details class="utilities-menu">
+          <summary>Utilities</summary>
+          <div class="utilities-popover">
+            <button class="view-button" type="button" data-view="settingsView">Packaging</button>
+            <button class="view-button" type="button" data-view="salesView">Sales</button>
+            <button class="view-button" type="button" data-view="trackingRepairView">Tracking Repair</button>
+            <button id="carrierRefreshButton" type="button">Refresh Carriers</button>
+            <button id="demoButton" class="demo-only" type="button">Demo Data</button>
+          </div>
+        </details>
         <button id="logoutButton" type="button">Log Out</button>
       </div>
     </header>
 
     <main>
-      <section class="controls">
+      <section class="workspace-status" aria-live="polite">
+        <div><strong id="eventScope">CBS Deals</strong><span id="syncFreshness">Loading saved report...</span></div>
+        <div class="status-actions">
+          <button id="applyCbsTagButton" type="button">Apply CBS-DEALS Tag</button>
+          <button id="refreshButton" type="button">Live Sync</button>
+        </div>
+      </section>
+
+      <section id="operationPanel" class="operation-panel" hidden aria-live="polite">
+        <div><strong id="operationTitle">Starting batch</strong><span id="operationStage">Queued</span></div>
+        <progress id="operationProgress" max="100" value="0"></progress>
+        <p id="operationDetail"></p>
+      </section>
+
+      <section class="controls legacy-controls" hidden>
         <label for="teamSizeInput">Team members</label>
         <input id="teamSizeInput" type="text" inputmode="numeric" pattern="[0-9]*" value="3">
         <label for="stationCountInput">Stations</label>
@@ -59,7 +77,7 @@
         <section class="quick-batch-panel">
           <div>
             <h2>Quick Count Batches</h2>
-            <p>Create one Veeqo tag for all current synced rows with the same order count.</p>
+            <p>Create CBS processing tags for current synced rows with the same order count.</p>
           </div>
           <div class="quick-batch-actions" id="quickBatchActions"></div>
         </section>
@@ -258,6 +276,12 @@
             <span id="historyTableCount">0</span>
           </div>
           <div class="collapsible-content">
+            <div class="history-filters">
+              <input id="historySearch" type="search" placeholder="Search tag or product">
+              <select id="historyCarrierFilter"><option value="">All carriers</option><option value="usps">USPS</option><option value="ups">UPS</option><option value="unknown">Unknown</option></select>
+              <select id="historyStatusFilter"><option value="">All statuses</option><option value="completed">Completed</option><option value="canceled">Canceled</option></select>
+              <input id="historyDateFilter" type="date" aria-label="Completed date">
+            </div>
             <div id="historyTable"></div>
           </div>
         </section>
@@ -289,6 +313,6 @@
     </main>
 
     <div id="statusToast" class="toast" hidden></div>
-    <script src="/app.js?v=20260604-1"></script>
+    <script src="/app.js?v=20260817-cbs1"></script>
   </body>
 </html>

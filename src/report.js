@@ -39,8 +39,10 @@ function renderClusterSection(title, clusters) {
   return lines;
 }
 
-export function buildReportPayload({ channelFilter, requireGmaSkus, status, threshold, orders, totalCount, totalPages, clusters, subBatches = null, summary, orderIssues = [], prepRows = [], dataSource = 'live Veeqo' }) {
+export function buildReportPayload({ eventId = 'cbs_deals', eventLabel = 'CBS Deals', channelFilter, requireGmaSkus, status, threshold, orders, totalCount, totalPages, clusters, subBatches = null, summary, orderIssues = [], prepRows = [], dataSource = 'live Veeqo' }) {
   return {
+    event_id: eventId,
+    event_label: eventLabel,
     generated_at: new Date().toISOString(),
     data_source: dataSource,
     channel_filter: channelFilter,
@@ -96,8 +98,9 @@ export function writeReports(payload) {
     ''
   ];
 
-  const latestMarkdownPath = resolve(reportDir, 'latest-analysis.md');
-  const latestJsonPath = resolve(reportDir, 'latest-analysis.json');
+  const suffix = payload.event_id ? `-${payload.event_id}` : '';
+  const latestMarkdownPath = resolve(reportDir, `latest-analysis${suffix}.md`);
+  const latestJsonPath = resolve(reportDir, `latest-analysis${suffix}.json`);
 
   writeFileSync(latestMarkdownPath, lines.join('\n'));
   writeFileSync(latestJsonPath, JSON.stringify(payload, null, 2));
@@ -105,8 +108,12 @@ export function writeReports(payload) {
   return { latestMarkdownPath, latestJsonPath };
 }
 
-export function readLatestReport() {
-  const latestJsonPath = resolve(process.cwd(), 'reports', 'latest-analysis.json');
-  if (!existsSync(latestJsonPath)) return null;
-  return JSON.parse(readFileSync(latestJsonPath, 'utf8'));
+export function readLatestReport(eventId = 'cbs_deals') {
+  const reportDir = resolve(process.cwd(), 'reports');
+  const eventPath = resolve(reportDir, `latest-analysis-${eventId}.json`);
+  if (existsSync(eventPath)) return JSON.parse(readFileSync(eventPath, 'utf8'));
+  if (eventId !== 'gma') return null;
+  const legacyPath = resolve(reportDir, 'latest-analysis.json');
+  if (!existsSync(legacyPath)) return null;
+  return JSON.parse(readFileSync(legacyPath, 'utf8'));
 }

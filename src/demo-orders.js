@@ -81,7 +81,7 @@ export function buildDemoOrders() {
     for (let index = 0; index < scenario.count; index += 1) {
       orders.push(makeOrder({
         id: id += 1,
-        number: `#D${number += 1}`,
+        number: `#CBS-DEMO-${number += 1}`,
         channel: 'Runway by Christian Siriano',
         status: 'awaiting_fulfillment',
         price: scenario.price,

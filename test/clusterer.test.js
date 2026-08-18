@@ -36,6 +36,20 @@ test('combines repeated SKU quantities inside one order', () => {
   ]);
 });
 
+test('CBS bundle parent prevents duplicate component counting', () => {
+  const parentOnly = normalizeOrderLineItems(order(1, 'CBS1', [['PL-RW-GAGBK3-R', 1]]));
+  const componentsOnly = normalizeOrderLineItems(order(2, 'CBS2', [
+    ['PL-RW-FL30-R', 1], ['PL-RW-SL30-R', 1], ['PL-RW-FT72-R', 1]
+  ]));
+  const parentAndComponents = normalizeOrderLineItems(order(3, 'CBS3', [
+    ['PL-RW-GAGBK3-R', 1], ['PL-RW-FL30-R', 1], ['PL-RW-SL30-R', 1], ['PL-RW-FT72-R', 1]
+  ]));
+
+  assert.deepEqual(parentOnly.map(({ sku, quantity }) => ({ sku, quantity })), [{ sku: 'PL-RW-GAGBK3-R', quantity: 1 }]);
+  assert.equal(componentsOnly.length, 3);
+  assert.deepEqual(parentAndComponents.map(({ sku, quantity }) => ({ sku, quantity })), [{ sku: 'PL-RW-GAGBK3-R', quantity: 1 }]);
+});
+
 test('classifies singles, kits, and combos', () => {
   assert.equal(classifyItems(normalizeOrderLineItems(order(1, '#1', [['PL-RW-SB15-R', 1]]))), 'single_qty1');
   assert.equal(classifyItems(normalizeOrderLineItems(order(2, '#2', [['PL-RW-SB15-R', 2]]))), 'single_qty2plus');

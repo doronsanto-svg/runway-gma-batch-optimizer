@@ -841,3 +841,346 @@ main {
     grid-template-columns: 1fr;
   }
 }
+
+/* CBS Deals operational shell */
+.topbar {
+  min-height: 76px;
+  padding: 11px 22px;
+}
+
+.app-logo {
+  height: 44px;
+  width: 44px;
+}
+
+h1 {
+  font-size: 23px;
+}
+
+.eyebrow {
+  font-size: 11px;
+}
+
+.actions {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.actions > button,
+.utilities-menu > summary {
+  align-items: center;
+  display: inline-flex;
+  font-size: 13px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.utilities-menu {
+  position: relative;
+}
+
+.utilities-menu > summary {
+  background: #ffffff;
+  color: var(--navy);
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+
+.utilities-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.utilities-popover {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgb(20 37 63 / 18%);
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+}
+
+.utilities-popover button {
+  justify-content: flex-start;
+  min-height: 38px;
+  text-align: left;
+}
+
+.demo-only {
+  display: none;
+}
+
+.legacy-controls {
+  display: none !important;
+}
+
+main {
+  padding: 18px 22px 44px;
+}
+
+.workspace-status,
+.operation-panel {
+  align-items: center;
+  border: 1px solid var(--line);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.workspace-status > div:first-child,
+.operation-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-status span,
+.operation-panel span,
+.operation-panel p {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+#refreshButton {
+  background: var(--navy);
+  color: #ffffff;
+}
+
+#applyCbsTagButton {
+  border: 1px solid var(--navy);
+}
+
+.is-stale {
+  color: #8a5a00 !important;
+}
+
+.is-expired,
+.operation-panel.failed p,
+.operation-panel.failed span {
+  color: #9d2a1f !important;
+}
+
+.operation-panel {
+  background: #f3faf7;
+  display: grid;
+  grid-template-columns: minmax(180px, .8fr) minmax(220px, 1fr) minmax(220px, 1fr);
+}
+
+.operation-panel[hidden] {
+  display: none;
+}
+
+.operation-panel progress {
+  height: 12px;
+  width: 100%;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  margin-bottom: 18px;
+}
+
+.metric {
+  min-height: 84px;
+  padding: 12px;
+}
+
+.metric strong {
+  font-size: 22px;
+}
+
+.history-filters {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(130px, 180px));
+  margin-bottom: 10px;
+}
+
+.history-filters input,
+.history-filters select {
+  border: 1px solid var(--line);
+  min-height: 40px;
+  padding: 7px 9px;
+}
+
+.history-table .table-row {
+  grid-template-columns: 90px minmax(220px, 1.3fr) minmax(190px, 1fr) 100px 120px 100px minmax(160px, 1fr) 100px 90px;
+  min-width: 1280px;
+}
+
+.history-table small {
+  color: var(--muted);
+  display: block;
+  margin-top: 4px;
+}
+
+@media (max-width: 980px) {
+  .topbar {
+    align-items: center;
+    flex-direction: row;
+    gap: 12px;
+    min-height: 82px;
+  }
+
+  .brand-lockup {
+    min-width: 205px;
+  }
+
+  .actions {
+    flex-direction: row;
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .cluster {
+    grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(90px, .7fr));
+  }
+
+  .cluster .batch-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+
+  .history-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    min-height: 0;
+    padding: 8px 12px;
+  }
+
+  .brand-lockup {
+    min-width: 0;
+  }
+
+  .app-logo {
+    height: 36px;
+    width: 36px;
+  }
+
+  h1 {
+    font-size: 20px;
+  }
+
+  .actions {
+    margin: 0 -12px;
+    padding: 0 12px 2px;
+  }
+
+  .actions > button,
+  .utilities-menu > summary {
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
+  main {
+    padding: 10px 12px 36px;
+  }
+
+  .workspace-status {
+    align-items: stretch;
+    display: grid;
+    gap: 8px;
+  }
+
+  .status-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .summary-grid,
+  .compact-grid {
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric {
+    min-height: 68px;
+    padding: 8px;
+  }
+
+  .metric span {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .metric strong {
+    font-size: 18px;
+    overflow-wrap: anywhere;
+  }
+
+  .operation-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .unit-breakdown-panel,
+  .chart-section {
+    display: none;
+  }
+
+  .quick-batch-panel {
+    align-items: stretch;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .quick-batch-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .quick-count-batch {
+    min-width: 0;
+    padding: 7px;
+  }
+
+  .cluster {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cluster > div:first-child,
+  .cluster .batch-actions {
+    grid-column: 1 / -1;
+  }
+
+  .cluster .batch-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .history-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .utilities-popover {
+    position: fixed;
+    right: 12px;
+    top: 112px;
+  }
+}

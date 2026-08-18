@@ -91,3 +91,21 @@ test('reopenCompletedBatchRecord restores completed batch as paused active work'
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('listBatches isolates CBS records from legacy GMA work', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fillement-batch-store-'));
+  const originalDataDir = process.env.DATA_DIR;
+  process.env.DATA_DIR = dir;
+  try {
+    const store = await import(`../src/batch-store.js?case=${Date.now()}-events`);
+    store.createBatchRecord({ event_id: 'cbs_deals', sub_batch_id: 'CBS::1', order_ids: [1], order_numbers: ['CBS1'] });
+    store.createBatchRecord({ event_id: 'gma', sub_batch_id: 'GMA::1', order_ids: [2], order_numbers: ['GMA1'] });
+    const cbs = store.listBatches('cbs_deals');
+    assert.deepEqual(cbs.active.map((batch) => batch.sub_batch_id), ['CBS::1']);
+    assert.equal(cbs.completed.length, 0);
+  } finally {
+    if (originalDataDir === undefined) delete process.env.DATA_DIR;
+    else process.env.DATA_DIR = originalDataDir;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

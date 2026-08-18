@@ -38,12 +38,24 @@ const issueTableCount = document.querySelector('#issueTableCount');
 const historySummaryGrid = document.querySelector('#historySummaryGrid');
 const historyTable = document.querySelector('#historyTable');
 const historyTableCount = document.querySelector('#historyTableCount');
+const historySearch = document.querySelector('#historySearch');
+const historyCarrierFilter = document.querySelector('#historyCarrierFilter');
+const historyStatusFilter = document.querySelector('#historyStatusFilter');
+const historyDateFilter = document.querySelector('#historyDateFilter');
 const toast = document.querySelector('#statusToast');
 const quickBatchActions = document.querySelector('#quickBatchActions');
 const unitBreakdown = document.querySelector('#unitBreakdown');
 const productPackagingTable = document.querySelector('#productPackagingTable');
 const shipperPackagingTable = document.querySelector('#shipperPackagingTable');
 const savePackagingButton = document.querySelector('#savePackagingButton');
+const eventScope = document.querySelector('#eventScope');
+const syncFreshness = document.querySelector('#syncFreshness');
+const applyCbsTagButton = document.querySelector('#applyCbsTagButton');
+const operationPanel = document.querySelector('#operationPanel');
+const operationTitle = document.querySelector('#operationTitle');
+const operationStage = document.querySelector('#operationStage');
+const operationProgress = document.querySelector('#operationProgress');
+const operationDetail = document.querySelector('#operationDetail');
 
 let currentReport = null;
 let batchState = { active: [], completed: [] };
@@ -53,6 +65,7 @@ let trackingRepairState = { rows: [], summary: {}, audit: { exports: [] } };
 let selectedTrackingKeys = new Set();
 let selectedPrepKeys = new Set();
 let packagingSettings = { products: {}, shippers: {} };
+let activeOperationId = null;
 let portalConfig = {
   veeqo_orders_url: 'https://app.veeqo.com/orders',
   veeqo_tag_filter_url_template: ''
@@ -147,6 +160,67 @@ function showToast(message) {
   window.setTimeout(() => {
     toast.hidden = true;
   }, 3200);
+}
+
+function renderFreshness(report = currentReport) {
+  if (!syncFreshness) return;
+  if (!report || report.empty || !report.generated_at) {
+    syncFreshness.textContent = 'No CBS sync yet';
+    return;
+  }
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(report.generated_at).getTime()) / 60000));
+  const stale = report.freshness?.stale ?? ageMinutes > 10;
+  const expired = report.freshness?.expired ?? ageMinutes > 30;
+  report.freshness = { ...(report.freshness || {}), stale, expired };
+  syncFreshness.textContent = `Last sync ${new Date(report.generated_at).toLocaleString()} · ${ageMinutes < 1 ? 'just now' : `${ageMinutes}m ago`}${expired ? ' · refresh required' : stale ? ' · stale' : ' · current'}`;
+  syncFreshness.classList.toggle('is-stale', stale);
+  syncFreshness.classList.toggle('is-expired', expired);
+  if (applyCbsTagButton) applyCbsTagButton.disabled = expired;
+  if (expired) {
+    document.querySelectorAll('.start-batch, .quick-count-batch, .complete-batch, .cancel-batch, .reopen-batch')
+      .forEach((button) => {
+        button.disabled = true;
+        button.title = 'Run Live Sync before changing Veeqo.';
+      });
+  }
+}
+
+function operationStageLabel(stage = '') {
+  return ({
+    queued: 'Queued', revalidating: 'Revalidating CBS orders', calculating_packages: 'Calculating packages',
+    updating_packages: 'Updating Veeqo packages', refreshing_carriers: 'Refreshing final carriers',
+    creating_tags: 'Creating Veeqo tags', completed: 'Completed', failed: 'Failed'
+  })[stage] || stage.replaceAll('_', ' ');
+}
+
+function renderOperation(operation) {
+  if (!operationPanel || !operation) return;
+  operationPanel.hidden = false;
+  operationTitle.textContent = operation.kind === 'count' ? `${operation.input?.order_count}-count CBS batch` : operation.input?.label || 'CBS batch';
+  operationStage.textContent = operationStageLabel(operation.stage || operation.status);
+  const total = Number(operation.total_orders || operation.input?.order_ids?.length || 0);
+  const complete = Number(operation.completed_orders || 0) + Number(operation.failed_orders || 0);
+  operationProgress.value = operation.status === 'completed' ? 100 : total ? Math.min(95, Math.round((complete / total) * 100)) : 5;
+  operationDetail.textContent = `${operation.completed_orders || 0} completed · ${operation.failed_orders || 0} failed · ${total} total${operation.error ? ` · ${operation.error}` : ''}`;
+  operationPanel.classList.toggle('failed', operation.status === 'failed');
+}
+
+async function pollOperation(operationId) {
+  activeOperationId = operationId;
+  for (;;) {
+    const response = await handleAuthResponse(await fetch(`/api/batch-operations/${encodeURIComponent(operationId)}`));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not read batch progress.');
+    renderOperation(result.operation);
+    if (['completed', 'failed'].includes(result.operation.status)) {
+      activeOperationId = null;
+      await loadBatches();
+      if (result.operation.status === 'failed') throw new Error(result.operation.error || 'Batch operation failed.');
+      showToast(`Batch ready: ${result.operation.completed_orders || 0} orders processed${result.operation.failed_orders ? `, ${result.operation.failed_orders} sent to review` : ''}.`);
+      return result.operation;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
 }
 
 async function copyText(value) {
@@ -437,8 +511,10 @@ function renderSalesReport(report = salesReport) {
   const supportsPages = report.pages_pulled !== null && report.pages_pulled !== undefined;
   salesGeneratedAt.textContent = report.generated_at ? new Date(report.generated_at).toLocaleString() : 'Loaded';
   salesSummaryGrid.innerHTML = [
+    metric('Event', report.event_label || 'CBS Deals'),
+    metric('Report Date', report.generated_at ? new Date(report.generated_at).toLocaleDateString() : '-'),
     metric('Source', report.data_source || 'Veeqo order history'),
-    metric('Channel', report.channel_filter || 'All channels'),
+    metric('Scope', report.event_id === 'cbs_deals' ? 'Order prefix CBS' : report.channel_filter || 'All channels'),
     supportsOrderPull ? metric('Orders Pulled', report.orders_pulled ?? 0) : '',
     summary.source_orders !== null && summary.source_orders !== undefined ? metric('Sales Orders', summary.source_orders) : '',
     supportsProcessing ? metric('Processed Orders', summary.processed_orders ?? 0) : '',
@@ -861,7 +937,7 @@ function quickCountSummary(orderCount, report = currentReport) {
 function renderQuickBatchActions(report = currentReport) {
   if (!quickBatchActions) return;
   if (!report || report.empty) {
-    quickBatchActions.innerHTML = '<span class="quick-batch-empty">Run Live Re-analyze first.</span>';
+    quickBatchActions.innerHTML = '<span class="quick-batch-empty">Run Live Sync first.</span>';
     return;
   }
 
@@ -913,55 +989,24 @@ function getHistoryTotals() {
 function renderSummary(report) {
   if (!report || report.empty) return;
   document.querySelectorAll('.summary-notice').forEach((notice) => notice.remove());
-  const currentOrderIds = new Set((report.actionable_batches || report.clusters || []).flatMap((batch) => batch.order_ids || []));
-  const relevantCompleted = batchState.completed.filter((batch) => (batch.order_ids || []).some((id) => currentOrderIds.has(id)));
-  const completedOrderCount = relevantCompleted.reduce((sum, batch) => sum + Number(batch.order_count || 0), 0);
-  const completedRevenue = relevantCompleted.reduce((sum, batch) => sum + Number(batch.total_revenue || 0), 0);
-  const openOrders = Math.max(0, report.summary.included_orders - completedOrderCount);
-  const openRevenue = Math.max(0, report.summary.total_revenue - completedRevenue);
-  const carrierLookup = report.summary.carrier_lookup || {};
-  const skipped = report.summary.skipped || {};
   const issueSummary = report.summary.issues || {};
   const totals = getHistoryTotals();
   const needUnitTotals = unitTotalsForRows(visibleActionableBatches(report));
   const processedUnitTotals = unitTotalsForRows(batchState.completed || []);
+  const activeOrders = (batchState.active || []).reduce((sum, batch) => sum + Number(batch.order_count || 0), 0);
+  const completedOrders = totals.orders;
+  const readyOrders = Number(report.summary.open_batchable_orders ?? report.summary.label_needed_orders ?? report.summary.included_orders ?? 0);
   summaryGrid.innerHTML = [
-    metric('Channel', report.channel_filter),
-    metric('Source', report.data_source || 'live Veeqo'),
-    metric('Status', report.status || 'awaiting_fulfillment'),
-    metric('Pulled From Veeqo', report.orders_pulled ?? 0),
-    metric('In This Channel', report.summary.source_orders ?? 0),
-    metric('Held Orders', report.summary.held_orders ?? 0),
-    metric('Batchable Orders', report.summary.batchable_orders ?? report.summary.included_orders ?? 0),
-    metric('Completed Locally', report.summary.local_completed_orders ?? 0),
-    metric('Open Batchable', report.summary.open_batchable_orders ?? report.summary.label_needed_orders ?? report.summary.included_orders ?? 0),
-    metric('Need Labels', report.summary.label_needed_orders ?? report.summary.included_orders ?? 0),
-    metric('Labels Already Bought', report.summary.label_purchased_orders ?? 0),
-    metric('Included Orders', report.summary.included_orders ?? 0),
-    metric('Sync Mode', carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Carrier refresh' : 'Fast sync'),
-    metric('Carrier Basis', carrierLookup.basis === 'fast_cached_delivery_fallback' ? 'Cache + fallback' : carrierLookup.basis === 'shipping_rate_with_delivery_method_fallback' ? 'Veeqo rates' : 'Delivery field'),
-    metric('Carrier Cache', `${carrierLookup.cached ?? 0} cached / ${carrierLookup.enriched ?? 0} new / ${carrierLookup.cache_miss ?? 0} fallback`),
-    metric('Open Orders', openOrders),
-    metric('Fulfilled Here', completedOrderCount),
-    metric('Units To Process', totalUnits(needUnitTotals)),
-    metric('Units Processed', totalUnits(processedUnitTotals)),
-    metric('All-Time Processed', totals.orders),
-    metric('All-Time Work Time', minutes(totals.seconds / 60)),
-    metric('Issue Orders', issueSummary.total_orders ?? 0),
-    metric('Hold Issues', issueSummary.hold_orders ?? 0),
-    metric('Fraud / Risk', issueSummary.by_type?.fraud ?? 0),
-    metric('Skipped Non-GMA', skipped.non_gma_only ?? 0),
-    metric('Skipped Mixed', skipped.mixed_gma_and_non_gma ?? 0),
-    metric('No Usable Items', skipped.no_items ?? 0),
-    metric('Clusters', report.clusters.length),
-    metric('Batch Candidates', report.summary.buckets.batch),
-    metric('Borderline', report.summary.buckets.borderline),
-    metric('Multipack', report.summary.buckets.multipack),
-    metric('Open Revenue', money(openRevenue)),
-    metric('Total Forecast', minutes(report.summary.estimated_minutes)),
-    metric('Generated', new Date(report.generated_at).toLocaleString())
+    metric('CBS Orders', report.summary.event_orders ?? report.summary.source_orders ?? 0),
+    metric('Held / Review', issueSummary.hold_orders ?? report.summary.held_orders ?? 0),
+    metric('Ready To Batch', readyOrders),
+    metric('Active / Parked', activeOrders),
+    metric('Labels Purchased', report.summary.label_purchased_orders ?? 0),
+    metric('Completed', completedOrders),
+    metric('Orders Remaining', readyOrders + activeOrders),
+    metric('Units Remaining / Processed', `${totalUnits(needUnitTotals)} / ${totalUnits(processedUnitTotals)}`)
   ].join('');
-  renderTeamForecast();
+  renderFreshness(report);
   renderUnitBreakdown(report);
   renderIssueView(report);
   renderHistoryView();
@@ -973,12 +1018,13 @@ function renderCluster(cluster) {
   const activeBatch = activeBatchForSubBatch(cluster.sub_batch_id);
   const issueOrderIds = new Set((currentReport?.order_issues || []).map((issue) => issue.order_id));
   const issueCount = (cluster.order_ids || []).filter((id) => issueOrderIds.has(id)).length;
+  const expired = currentReport?.freshness?.expired;
   const action = activeBatch
     ? `<div class="batch-actions">
         <button type="button" disabled>Active</button>
         <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(activeBatch.tag_name, activeBatch.tag_id || ''))}" data-tag-name="${escapeHtml(activeBatch.tag_name)}" data-tag-id="${escapeHtml(activeBatch.tag_id || '')}">Open Veeqo</a>
       </div>`
-    : `<button class="start-batch" type="button" data-sub-batch-id="${safeSubBatchId}">Start Batch</button>`;
+    : `<button class="start-batch" type="button" data-sub-batch-id="${safeSubBatchId}"${expired ? ' disabled title="Run Live Sync before starting a batch"' : ''}>Start Batch</button>`;
 
   return `
     <article class="cluster">
@@ -988,9 +1034,9 @@ function renderCluster(cluster) {
       </div>
       <div class="cell"><span>Orders</span><strong>${cluster.order_count}</strong></div>
       <div class="cell"><span>Issues</span><strong>${issueCount}</strong></div>
-      <div class="cell"><span>Revenue</span><strong>${money(cluster.total_revenue)}</strong></div>
-      <div class="cell"><span>Estimate</span><strong>${minutes(cluster.estimated_minutes)}</strong></div>
-      <div class="cell"><span>Station / Package</span><strong>${escapeHtml(cluster.station)}</strong>${packageControl(cluster, 'batch')}</div>
+      <div class="cell"><span>Units</span><strong>${totalUnits(unitTotalsForRows([cluster]))}</strong></div>
+      <div class="cell"><span>Carrier</span><strong>${escapeHtml(cluster.carrier_label || 'Unknown')}</strong></div>
+      <div class="cell"><span>Package</span>${packageControl(cluster, 'batch')}</div>
       ${action}
     </article>
   `;
@@ -1073,20 +1119,15 @@ async function startBatch(subBatchId, button) {
   if (!cluster) return;
   setButtonProcessing(button, true, 'Starting...');
   try {
-    const response = await handleAuthResponse(await fetch('/api/batches', {
+    const response = await handleAuthResponse(await fetch('/api/batch-operations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sub_batch_id: subBatchId })
+      body: JSON.stringify({ kind: 'sub_batch', sub_batch_id: subBatchId })
     }));
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Failed to start batch');
-    await loadBatches();
-    try {
-      await copyText(result.batch.tag_name);
-      showToast(`Batch started and tag copied: ${result.batch.tag_name}`);
-    } catch {
-      showToast(`Batch started: ${result.batch.tag_name}`);
-    }
+    renderOperation(result.operation);
+    await pollOperation(result.operation.id);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1102,10 +1143,11 @@ async function startCountBatch(orderCount, button) {
   }
   setButtonProcessing(button, true, 'Starting...');
   try {
-    const response = await handleAuthResponse(await fetch('/api/batches/by-count', {
+    const response = await handleAuthResponse(await fetch('/api/batch-operations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        kind: 'count',
         order_count: Number(orderCount),
         order_ids: summary.order_ids,
         order_numbers: summary.order_numbers,
@@ -1114,18 +1156,8 @@ async function startCountBatch(orderCount, button) {
     }));
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Failed to start count batch');
-    await loadBatches();
-    const createdBatches = Array.isArray(result.batches) && result.batches.length ? result.batches : [result.batch].filter(Boolean);
-    const firstTag = createdBatches[0]?.tag_name || result.batch?.tag_name;
-    const reviewNote = result.package_review_count
-      ? ` ${result.package_review_count} order${result.package_review_count === 1 ? '' : 's'} skipped for Package Review.`
-      : '';
-    try {
-      await copyText(firstTag);
-      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started. First tag copied: ${firstTag}.${reviewNote}`);
-    } catch {
-      showToast(`${createdBatches.length} count batch tag${createdBatches.length === 1 ? '' : 's'} started.${reviewNote}`);
-    }
+    renderOperation(result.operation);
+    await pollOperation(result.operation.id);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1155,7 +1187,7 @@ async function reopenBatch(batchId, button) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Failed to reopen batch');
     await loadBatches();
-    showToast(`Batch reopened as paused. Tag status: ${result.batch.cleanup_status}`);
+    showToast(`Batch reopened as parked. Tag status: ${result.batch.cleanup_status}`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1179,13 +1211,13 @@ async function cancelBatch(batchId, button) {
 }
 
 async function pauseBatch(batchId, button) {
-  setButtonProcessing(button, true, 'Pausing...');
+  setButtonProcessing(button, true, 'Parking...');
   try {
-    const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/pause`, { method: 'POST' }));
+    const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/park`, { method: 'POST' }));
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Failed to pause batch');
+    if (!response.ok) throw new Error(result.error || 'Failed to park batch');
     await loadBatches();
-    showToast(`Batch paused: ${result.batch.tag_name}`);
+    showToast(`Batch parked: ${result.batch.tag_name}`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1194,13 +1226,13 @@ async function pauseBatch(batchId, button) {
 }
 
 async function resumeBatch(batchId, button) {
-  setButtonProcessing(button, true, 'Resuming...');
+  setButtonProcessing(button, true, 'Returning...');
   try {
-    const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/resume`, { method: 'POST' }));
+    const response = await handleAuthResponse(await fetch(`/api/batches/${encodeURIComponent(batchId)}/activate`, { method: 'POST' }));
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Failed to resume batch');
+    if (!response.ok) throw new Error(result.error || 'Failed to return batch to active');
     await loadBatches();
-    showToast(`Batch resumed: ${result.batch.tag_name}`);
+    showToast(`Batch active: ${result.batch.tag_name}`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -1292,7 +1324,7 @@ function renderBatches() {
   activeBatchCount.textContent = running.length;
   activeBatches.innerHTML = running.length
     ? running.map((batch) => {
-      const paused = batch.status === 'paused';
+      const parked = batch.status === 'parked' || batch.status === 'paused';
       return `
       <article class="cluster active">
         <div>
@@ -1302,28 +1334,28 @@ function renderBatches() {
             <button class="copy-tag" type="button" data-tag-name="${escapeHtml(batch.tag_name)}">Copy</button>
             <a class="open-veeqo" target="_blank" rel="noopener" href="${escapeHtml(veeqoUrlForTag(batch.tag_name, batch.tag_id || ''))}" data-tag-name="${escapeHtml(batch.tag_name)}" data-tag-id="${escapeHtml(batch.tag_id || '')}">Open Veeqo</a>
           </div>
-          <p>Started ${new Date(batch.started_at).toLocaleTimeString()}</p>
+          <p>Created ${new Date(batch.created_at || batch.started_at).toLocaleString()}</p>
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
         <div class="cell"><span>Carrier for label</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong>${labelCarrierControl(batch)}</div>
-        <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
-        <div class="cell"><span>Elapsed</span><strong>${minutes(activeElapsedSeconds(batch) / 60)}</strong></div>
-        <div class="cell"><span>Status</span><strong>${paused ? 'Paused' : 'Running'}</strong></div>
+        <div class="cell"><span>Package</span><strong>${escapeHtml(batch.package || 'Review')}</strong></div>
+        <div class="cell"><span>Units</span><strong>${totalUnits(unitTotalsForRows([batch]))}</strong></div>
+        <div class="cell"><span>Status</span><strong>${parked ? 'Parked' : 'Active'}</strong></div>
         <div class="batch-actions">
           <button class="print-batch-label" type="button" data-batch-id="${escapeHtml(batch.id)}">Print Batch Label</button>
           <button class="complete-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Mark Complete</button>
-          <button class="${paused ? 'resume-batch' : 'pause-batch'}" type="button" data-batch-id="${escapeHtml(batch.id)}">${paused ? 'Resume' : 'Pause'}</button>
+          <button class="${parked ? 'resume-batch' : 'pause-batch'}" type="button" data-batch-id="${escapeHtml(batch.id)}">${parked ? 'Return to Active' : 'Park'}</button>
           <button class="cancel-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Cancel</button>
         </div>
       </article>
     `;
     }).join('')
-    : '<p class="empty">No active batch timers.</p>';
+    : '<p class="empty">No active or parked CBS batches.</p>';
 
   const completed = batchState.completed || [];
   completedBatchCount.textContent = completed.length;
   completedBatches.innerHTML = completed.length
-    ? completed.slice(0, 12).map((batch) => `
+    ? completed.slice(0, 5).map((batch) => `
       <article class="cluster complete">
         <div>
           <h3>${escapeHtml(batch.label)}</h3>
@@ -1335,9 +1367,9 @@ function renderBatches() {
         </div>
         <div class="cell"><span>Orders</span><strong>${batch.order_count}</strong></div>
         <div class="cell"><span>Carrier for label</span><strong>${escapeHtml(batch.carrier_label || 'Unknown')}</strong>${labelCarrierControl(batch)}</div>
-        <div class="cell"><span>Estimate</span><strong>${minutes(batch.estimated_minutes || 0)}</strong></div>
-        <div class="cell"><span>Duration</span><strong>${minutes((batch.duration_seconds || 0) / 60)}</strong></div>
-        <div class="cell"><span>Rate</span><strong>${Number(batch.orders_per_minute || 0).toFixed(1)}/min</strong></div>
+        <div class="cell"><span>Package</span><strong>${escapeHtml(batch.package || '')}</strong></div>
+        <div class="cell"><span>Units</span><strong>${totalUnits(unitTotalsForRows([batch]))}</strong></div>
+        <div class="cell"><span>Completed</span><strong>${batch.completed_at ? new Date(batch.completed_at).toLocaleDateString() : ''}</strong></div>
         <div class="batch-actions">
           <button class="print-batch-label" type="button" data-batch-id="${escapeHtml(batch.id)}">Print Batch Label</button>
           <button class="reopen-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Reopen</button>
@@ -1396,8 +1428,7 @@ function renderPrepView() {
     metric('Open Rows', summary.open_rows ?? rows.filter((row) => !row.prepared).length),
     metric('Prepared Rows', summary.prepared_rows ?? rows.filter((row) => row.prepared).length),
     metric('Open Orders', summary.open_orders ?? rows.filter((row) => !row.prepared).reduce((sum, row) => sum + row.order_count, 0)),
-    metric('Prepared Orders', summary.prepared_orders ?? rows.filter((row) => row.prepared).reduce((sum, row) => sum + row.order_count, 0)),
-    metric('Open Prep Time', minutes(summary.estimated_minutes || 0))
+    metric('Prepared Orders', summary.prepared_orders ?? rows.filter((row) => row.prepared).reduce((sum, row) => sum + row.order_count, 0))
   ].join('');
   printPrepButton.textContent = `Print Selected Prep (${selectedPrepKeys.size})`;
   prepTableCount.textContent = rows.length;
@@ -1826,32 +1857,43 @@ function renderIssueView(report = currentReport) {
 
 function renderHistoryView() {
   if (!historySummaryGrid || !historyTable || !historyTableCount) return;
-  const completed = batchState.completed || [];
+  const allRows = [...(batchState.completed || []), ...(batchState.canceled || [])];
+  const query = String(historySearch?.value || '').trim().toLowerCase();
+  const carrier = String(historyCarrierFilter?.value || '').toLowerCase();
+  const status = String(historyStatusFilter?.value || '').toLowerCase();
+  const date = historyDateFilter?.value || '';
+  const completed = allRows.filter((batch) => {
+    const searchable = `${batch.tag_name || ''} ${batch.label || ''} ${(batch.items || []).map((item) => item.name || item.sku).join(' ')}`.toLowerCase();
+    if (query && !searchable.includes(query)) return false;
+    if (carrier && !String(batch.carrier || batch.carrier_label || 'unknown').toLowerCase().includes(carrier)) return false;
+    if (status && String(batch.status || '').toLowerCase() !== status) return false;
+    const recordDate = String(batch.completed_at || batch.canceled_at || '').slice(0, 10);
+    return !date || recordDate === date;
+  });
   const totals = getHistoryTotals();
   historySummaryGrid.innerHTML = [
     metric('Completed Batches', totals.batches),
     metric('Orders Processed', totals.orders),
-    metric('Estimated Time', minutes(totals.estimateSeconds / 60)),
-    metric('Actual Time', minutes(totals.seconds / 60)),
-    metric('Avg Rate', totals.seconds ? `${(totals.orders / (totals.seconds / 60)).toFixed(1)}/min` : '0.0/min')
+    metric('Units Processed', totalUnits(unitTotalsForRows(batchState.completed || []))),
+    metric('Event', 'CBS Deals')
   ].join('');
   historyTableCount.textContent = completed.length;
   historyTable.innerHTML = completed.length ? `
     <div class="data-table history-table">
       <div class="table-row table-head">
-        <span>Batch</span><span>Tag</span><span>Orders</span><span>Carrier</span><span>Estimate</span><span>Actual</span><span>Completed</span><span>Cleanup</span><span>Action</span>
+        <span>Event</span><span>Batch / Products</span><span>Tag</span><span>Orders / Units</span><span>Package</span><span>Carrier</span><span>Status / Date</span><span>Cleanup</span><span>Action</span>
       </div>
       ${completed.map((batch) => `
         <div class="table-row history-row">
-          <span>${escapeHtml(batch.label)}</span>
+          <span>CBS Deals</span>
+          <span><strong>${escapeHtml(batch.label || '')}</strong><small>${escapeHtml((batch.items || []).map((item) => item.name || item.sku).join(' + '))}</small></span>
           <span><code>${escapeHtml(batch.tag_name)}</code></span>
-          <span>${batch.order_count}</span>
+          <span>${batch.order_count} / ${totalUnits(unitTotalsForRows([batch]))}</span>
+          <span>${escapeHtml(batch.package || '')}</span>
           <span>${escapeHtml(batch.carrier_label || 'Unknown')}</span>
-          <span>${minutes(batch.estimated_minutes || 0)}</span>
-          <span>${minutes((batch.duration_seconds || 0) / 60)}</span>
-          <span>${batch.completed_at ? new Date(batch.completed_at).toLocaleString() : ''}</span>
+          <span>${escapeHtml(batch.status || '')}<small>${batch.completed_at ? new Date(batch.completed_at).toLocaleString() : batch.canceled_at ? new Date(batch.canceled_at).toLocaleString() : ''}</small></span>
           <span>${escapeHtml(batch.cleanup_status || '')}</span>
-          <span><button class="reopen-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Reopen</button></span>
+          <span>${batch.status === 'completed' ? `<button class="reopen-batch" type="button" data-batch-id="${escapeHtml(batch.id)}">Reopen</button>` : ''}</span>
         </div>
       `).join('')}
     </div>
@@ -1864,11 +1906,22 @@ async function loadLatest() {
   await loadBatches();
   await loadPrep();
   renderReport(report);
+  const operationResponse = await handleAuthResponse(await fetch('/api/batch-operations'));
+  const operationState = await operationResponse.json();
+  const pendingOperation = (operationState.operations || []).find((operation) => ['queued', 'running'].includes(operation.status));
+  if (pendingOperation && !activeOperationId) {
+    renderOperation(pendingOperation);
+    pollOperation(pendingOperation.id).catch((error) => showToast(error.message));
+  }
+  if (report?.freshness?.stale) {
+    window.setTimeout(() => refreshAnalysis({ background: true }), 250);
+  }
 }
 
 async function loadPortalConfig() {
   const response = await handleAuthResponse(await fetch('/api/session'));
   portalConfig = { ...portalConfig, ...(await response.json()) };
+  if (eventScope) eventScope.textContent = portalConfig.event_label || 'CBS Deals';
   if (!channelInput.value.trim() && portalConfig.default_channel_filter) {
     channelInput.value = portalConfig.default_channel_filter;
   }
@@ -1900,17 +1953,16 @@ async function scanChannels() {
   }
 }
 
-async function refreshAnalysis({ demo = false, refreshCarriers = false } = {}) {
+async function refreshAnalysis({ demo = false, refreshCarriers = false, background = false } = {}) {
   refreshButton.disabled = true;
   carrierRefreshButton.disabled = true;
   demoButton.disabled = true;
   const activeButton = demo ? demoButton : refreshCarriers ? carrierRefreshButton : refreshButton;
-  setButtonProcessing(activeButton, true, refreshCarriers ? 'Refreshing...' : 'Analyzing...');
+  setButtonProcessing(activeButton, true, refreshCarriers ? 'Refreshing...' : background ? 'Syncing...' : 'Syncing...');
   try {
     const params = new URLSearchParams();
     if (demo) params.set('demo', '1');
     if (refreshCarriers) params.set('refresh_carriers', '1');
-    if (!demo && channelInput.value.trim()) params.set('channel', channelInput.value.trim());
     const response = await handleAuthResponse(await fetch(`/api/analyze?${params.toString()}`, { method: 'POST' }));
     const report = await response.json();
     if (!response.ok) throw new Error(report.error || 'Analyze failed');
@@ -1919,7 +1971,7 @@ async function refreshAnalysis({ demo = false, refreshCarriers = false } = {}) {
     if (!demo && Number(report.summary?.included_orders || 0) === 0) {
       showToast(`No included orders. Pulled ${report.orders_pulled || 0}; channel matched ${report.summary?.source_orders || 0}.`);
     } else {
-      showToast(demo ? 'Demo analysis loaded.' : refreshCarriers ? 'Carrier refresh complete.' : 'Fast live analysis refreshed.');
+      if (!background) showToast(demo ? 'Demo analysis loaded.' : refreshCarriers ? 'Carrier refresh complete.' : 'CBS live sync refreshed.');
     }
   } catch (error) {
     showToast(error.message);
@@ -1931,7 +1983,29 @@ async function refreshAnalysis({ demo = false, refreshCarriers = false } = {}) {
   }
 }
 
+async function applyCbsTag(button = applyCbsTagButton) {
+  const matched = Number(currentReport?.summary?.event_orders ?? currentReport?.summary?.source_orders ?? 0);
+  if (!matched) {
+    showToast('Run Live Sync before applying the CBS-DEALS tag.');
+    return;
+  }
+  if (!window.confirm(`Apply the persistent CBS-DEALS tag to ${matched} matched CBS order${matched === 1 ? '' : 's'}?`)) return;
+  setButtonProcessing(button, true, 'Applying...');
+  try {
+    const response = await handleAuthResponse(await fetch('/api/events/cbs_deals/tag-orders', { method: 'POST' }));
+    const result = await response.json();
+    if (!response.ok && response.status !== 207) throw new Error(result.error || 'CBS tag action failed.');
+    showToast(`CBS-DEALS: ${result.tagged} tagged, ${result.already_tagged} already tagged, ${result.failed} failed.`);
+    await refreshAnalysis({ background: true });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setButtonProcessing(button, false);
+  }
+}
+
 refreshButton.addEventListener('click', () => refreshAnalysis());
+applyCbsTagButton?.addEventListener('click', () => applyCbsTag(applyCbsTagButton));
 carrierRefreshButton.addEventListener('click', () => refreshAnalysis({ refreshCarriers: true }));
 demoButton.addEventListener('click', () => refreshAnalysis({ demo: true }));
 channelScanButton.addEventListener('click', scanChannels);
@@ -1943,14 +2017,14 @@ logoutButton.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';
 });
-teamSizeInput.addEventListener('input', renderTeamForecast);
-stationCountInput.addEventListener('input', renderTeamForecast);
+teamSizeInput?.addEventListener('input', renderTeamForecast);
+stationCountInput?.addEventListener('input', renderTeamForecast);
 document.querySelectorAll('.view-button').forEach((button) => {
   button.addEventListener('click', () => {
     document.querySelectorAll('.view-button').forEach((item) => item.classList.toggle('active', item === button));
     document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active-view', view.id === button.dataset.view));
-    if (button.dataset.view === 'salesView' && !salesReport) loadSalesReport(salesRefreshButton);
     if (button.dataset.view === 'trackingRepairView' && !(trackingRepairState.audit?.exports || []).length) loadTrackingRepairAudit().catch((error) => showToast(error.message));
+    document.querySelector('.utilities-menu')?.removeAttribute('open');
   });
 });
 document.addEventListener('click', (event) => {
@@ -2100,8 +2174,12 @@ document.addEventListener('blur', (event) => {
   else updatePrepPackage(input.dataset.signature, input.dataset.label, value, input.dataset.category, items);
 }, true);
 window.setInterval(() => {
-  if ((batchState.active || []).length) renderBatches();
+  renderFreshness();
 }, 30000);
+historySearch?.addEventListener('input', renderHistoryView);
+historyCarrierFilter?.addEventListener('change', renderHistoryView);
+historyStatusFilter?.addEventListener('change', renderHistoryView);
+historyDateFilter?.addEventListener('change', renderHistoryView);
 loadPortalConfig()
   .then(loadLatest)
   .then(loadPackagingSettings)

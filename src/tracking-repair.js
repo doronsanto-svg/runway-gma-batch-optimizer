@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getOrderChannelName } from './veeqo.js';
+import { CBS_EVENT_ID, orderMatchesEvent } from './event.js';
 
 export const TRACKING_CSV_HEADERS = [
   'Order Name',
@@ -139,13 +140,15 @@ function veeqoLink(order, config = {}) {
   return id ? `${base}/${encodeURIComponent(id)}` : base;
 }
 
-export function trackingRowsFromOrders(orders = [], { channelFilter = '', config = {} } = {}) {
+export function trackingRowsFromOrders(orders = [], { eventId = null, channelFilter = '', config = {} } = {}) {
   const channelNeedle = clean(channelFilter).toLowerCase();
   const rows = [];
 
   for (const order of orders || []) {
     const channel = getOrderChannelName(order);
-    if (channelNeedle && clean(channel).toLowerCase() !== channelNeedle) continue;
+    if (eventId === CBS_EVENT_ID) {
+      if (!orderMatchesEvent(order, eventId)) continue;
+    } else if (channelNeedle && clean(channel).toLowerCase() !== channelNeedle) continue;
 
     const shipments = maybeShipmentRecords(order);
     const shipmentList = shipments.length ? shipments : [{}];
@@ -162,6 +165,7 @@ export function trackingRowsFromOrders(orders = [], { channelFilter = '', config
         if (!carrier) reasons.push('Missing carrier.');
 
         rows.push({
+          event_id: eventId || 'legacy_unscoped',
           key: `${clean(order?.id)}:${shipmentId(shipment)}:${trackingNumber || 'missing'}`,
           eligible: reasons.length === 0,
           reasons,
@@ -216,9 +220,14 @@ export function rowsToTrackingCsv(rows = []) {
   return `${lines.join('\n')}\n`;
 }
 
-export function readTrackingAudit() {
+export function readTrackingAudit(eventId = null) {
   if (!existsSync(storePath)) return { exports: [] };
-  return JSON.parse(readFileSync(storePath, 'utf8'));
+  const store = JSON.parse(readFileSync(storePath, 'utf8'));
+  if (!eventId) return store;
+  return {
+    ...store,
+    exports: (store.exports || []).filter((record) => record.event_id === eventId)
+  };
 }
 
 function writeTrackingAudit(store) {
@@ -227,9 +236,10 @@ function writeTrackingAudit(store) {
   return store;
 }
 
-export function recordTrackingExport({ rows = [], filename, now = new Date().toISOString() }) {
+export function recordTrackingExport({ rows = [], filename, eventId = CBS_EVENT_ID, now = new Date().toISOString() }) {
   const store = readTrackingAudit();
   const record = {
+    event_id: eventId,
     id: `tracking-export-${Date.now()}`,
     status: 'exported',
     filename,

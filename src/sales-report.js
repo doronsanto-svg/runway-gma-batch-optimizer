@@ -1,4 +1,5 @@
 import { GMA_SKUS } from './constants.js';
+import { CBS_EVENT_ID, orderMatchesEvent } from './event.js';
 import { normalizeOrderLineItems } from './clusterer.js';
 import { getOrderChannelName } from './veeqo.js';
 
@@ -185,7 +186,7 @@ export function buildProductSalesSnapshotReport({ productSales = [], generatedAt
   };
 }
 
-export function buildSalesReport({ orders = [], channelFilter = '', completedOrderIds = new Set(), generatedAt = new Date().toISOString(), dataSource = 'Veeqo order history', totalCount = null, totalPages = null, pagesPulled = null } = {}) {
+export function buildSalesReport({ orders = [], eventId = null, channelFilter = '', completedOrderIds = new Set(), generatedAt = new Date().toISOString(), dataSource = 'Veeqo order history', totalCount = null, totalPages = null, pagesPulled = null } = {}) {
   const products = emptyProductTotals();
   const kits = emptyKitTotals();
   const channelNeedle = String(channelFilter || '').trim().toLowerCase();
@@ -196,7 +197,9 @@ export function buildSalesReport({ orders = [], channelFilter = '', completedOrd
 
   for (const order of orders || []) {
     const channelName = getOrderChannelName(order);
-    if (channelNeedle && String(channelName || '').trim().toLowerCase() !== channelNeedle) continue;
+    if (eventId === CBS_EVENT_ID) {
+      if (!orderMatchesEvent(order, eventId)) continue;
+    } else if (channelNeedle && String(channelName || '').trim().toLowerCase() !== channelNeedle) continue;
 
     const items = normalizeOrderLineItems(order).filter((item) => item.gma);
     if (!items.length) {
@@ -243,6 +246,8 @@ export function buildSalesReport({ orders = [], channelFilter = '', completedOrd
   const unprocessedOrders = sourceOrders.length - processedOrders;
 
   return {
+    event_id: eventId,
+    event_label: eventId === CBS_EVENT_ID ? 'CBS Deals' : 'GMA Legacy',
     generated_at: generatedAt,
     data_source: dataSource,
     channel_filter: channelFilter,

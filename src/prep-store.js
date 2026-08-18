@@ -12,8 +12,8 @@ function emptyStore() {
   return { package_overrides: {}, package_memory: { signatures: {}, groups: {}, categories: {} }, prepared: {} };
 }
 
-export function prepKey(signature, packageName) {
-  return `${signature}::${packageName || ''}`;
+export function prepKey(signature, packageName, eventId = 'gma') {
+  return `${eventId}::${signature}::${packageName || ''}`;
 }
 
 export function readPrepStore() {
@@ -172,10 +172,11 @@ export function setPackageOverride({ signature, label, packageName, category = '
   return store;
 }
 
-export function setPreparedStatus({ signature, label, packageName, prepared }) {
+export function setPreparedStatus({ signature, label, packageName, prepared, eventId = 'cbs_deals' }) {
   const store = readPrepStore();
-  const key = prepKey(signature, packageName);
+  const key = prepKey(signature, packageName, eventId);
   store.prepared[key] = {
+    event_id: eventId,
     signature,
     label,
     package: packageName,
@@ -189,11 +190,14 @@ export function setPreparedStatus({ signature, label, packageName, prepared }) {
 
 export function buildPrepRows(clusters, store = readPrepStore()) {
   return (clusters || []).map((cluster) => {
+    const eventId = cluster.event_id || 'gma';
     const suggestion = packageSuggestionForCluster(cluster, store);
     const packageName = suggestion.packageName;
-    const key = prepKey(cluster.signature, packageName);
-    const preparedRecord = store.prepared?.[key] || {};
+    const key = prepKey(cluster.signature, packageName, eventId);
+    const legacyKey = `${cluster.signature}::${packageName || ''}`;
+    const preparedRecord = store.prepared?.[key] || (eventId === 'gma' ? store.prepared?.[legacyKey] : null) || {};
     return {
+      event_id: eventId,
       prep_key: key,
       signature: cluster.signature,
       label: cluster.label,
@@ -227,6 +231,7 @@ export function prepSummary(rows) {
     prepared_rows: preparedRows.length,
     open_orders: openRows.reduce((sum, row) => sum + row.order_count, 0),
     prepared_orders: preparedRows.reduce((sum, row) => sum + row.order_count, 0),
-    estimated_minutes: openRows.reduce((sum, row) => sum + row.estimated_minutes, 0)
+    estimated_minutes: rows.filter((row) => !row.prepared)
+      .reduce((sum, row) => sum + Number(row.estimated_minutes || 0), 0)
   };
 }

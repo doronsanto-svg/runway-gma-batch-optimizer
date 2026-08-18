@@ -1,4 +1,30 @@
-# Runway GMA Batch Optimizer
+# Fillement
+
+CBS Deals fulfillment workspace backed by Veeqo. The active event is `cbs_deals`; an order belongs to it only when its normalized order number begins with `CBS` (for example `CBSD2440058-1` or `#CBSD2440058-1`). Channel is retained for audit and does not control CBS inclusion.
+
+## Current CBS Workflow
+
+1. Open Fillement and run **Live Sync**. This is read-only.
+2. Resolve orders in **Issues**, including fraud, shipping holds, and Product Setup Review.
+3. Optionally use **Apply CBS-DEALS Tag** to add the persistent event tag to matched orders.
+4. Start a candidate or a 1/2/3-count consolidation. The server revalidates each order, updates packages, refreshes final carriers, and creates temporary processing tags in groups of no more than 50.
+5. Use **Park** when work leaves the active line; use **Return to Active** when it comes back.
+6. Complete or cancel the batch to remove only its temporary processing tag. The persistent `CBS-DEALS` tag remains.
+
+The dashboard warns after 10 minutes without a successful sync and blocks Veeqo-writing actions after 30 minutes. Operations and history persist under `DATA_DIR`; Render must keep the `/data` disk attached.
+
+Run locally:
+
+```bash
+npm test
+npm start
+```
+
+The production service is configured by `render.yaml`. Required secrets are `VEEQO_API_KEY`, `PORTAL_USERNAME`, and `PORTAL_PASSWORD`.
+
+Before launch, validate 1–3 CBS orders end to end, then rehearse one 50-order batch. Do not use ordinary Runway orders for this rehearsal because non-CBS prefixes are intentionally excluded.
+
+## Historical GMA Notes
 
 Local fulfillment tool for the Runway x GMA June 1, 2026 order surge.
 

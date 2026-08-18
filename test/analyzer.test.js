@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyPackageStateToReport, completedOrderIdsForAnalysis, orderHasPurchasedLabel, splitHeldOrders } from '../src/analyzer.js';
+import { applyPackageStateToReport, completedOrderIdsForAnalysis, orderHasPurchasedLabel, partitionBatchableOrders, productSetupIssue, splitHeldOrders } from '../src/analyzer.js';
 
 test('splitHeldOrders excludes hold issue orders from batchable orders', () => {
   const orders = [{ id: 1 }, { id: 2 }, { id: 3 }];
@@ -77,4 +77,32 @@ test('applyPackageStateToReport reapplies saved package choices to latest report
   assert.equal(hydrated.clusters[0].package, '8x12 pouch');
   assert.equal(hydrated.actionable_batches[0].package, '8x12 pouch');
   assert.equal(hydrated.prep_rows[0].package, '8x12 pouch');
+});
+
+test('unknown CBS products are routed to Product Setup Review', () => {
+  const issue = productSetupIssue({
+    id: 42,
+    number: 'CBS42',
+    line_items: [{ quantity: 1, sellable: { sku_code: 'CBS-UNKNOWN', full_title: 'Unconfigured CBS Product' } }]
+  });
+  assert.equal(issue.hold, true);
+  assert.deepEqual(issue.issue_types, ['product']);
+  assert.match(issue.issues[0].detail, /CBS-UNKNOWN/);
+});
+
+test('CBS batchable orders resolve to one active, completed, label, or candidate state', () => {
+  const orders = [
+    { id: 1, number: 'CBS1' },
+    { id: 2, number: 'CBS2', tracking_number: '9400' },
+    { id: 3, number: 'CBS3' },
+    { id: 4, number: 'CBS4' }
+  ];
+  const states = partitionBatchableOrders(orders, {
+    active: [{ event_id: 'cbs_deals', order_ids: ['3'] }],
+    completed: [{ event_id: 'cbs_deals', mode: 'live', order_ids: [4] }]
+  });
+  assert.deepEqual(states.candidates.map((order) => order.id), [1]);
+  assert.deepEqual(states.labelPurchased.map((order) => order.id), [2]);
+  assert.deepEqual(states.active.map((order) => order.id), [3]);
+  assert.deepEqual(states.completed.map((order) => order.id), [4]);
 });
